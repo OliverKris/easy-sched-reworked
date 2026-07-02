@@ -69,7 +69,7 @@ def build_slots(sections: List[Section]) -> List[SlotSpec]:
         for i in range(1, reqs.la_count + 1):
             slots.append(SlotSpec(section, PositionType.LA, i))
         for i in range(1, reqs.uta_count + 1):
-            slots.append(SlotSpec(section, PositionType.UTA, 1))
+            slots.append(SlotSpec(section, PositionType.UTA, i))
     return slots
 
 

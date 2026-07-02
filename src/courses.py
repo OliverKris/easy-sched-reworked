@@ -46,7 +46,7 @@ class LabSection:
 
     def __str__(self):
         times = ", ".join(str(m) for m in self.meetings)
-        return f"{self.lab_id} ({items})"
+        return f"{self.lab_id} ({times})"
     
 
 
