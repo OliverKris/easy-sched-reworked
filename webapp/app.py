@@ -16,11 +16,11 @@ from flask import Flask, jsonify, request, render_template
 # Make the sibling `src` package importable when running this file directly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.enums import PositionType
-from src.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
-from src.csp_solver import CSPSolver, SolverConfig
-from src.test_data import load_demo_data
-from src.test_data_extended import load_extended_data
+from backend.src.enums import PositionType
+from backend.src.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
+from backend.src.csp_solver import CSPSolver, SolverConfig
+from backend.src.test_data import load_demo_data
+from backend.src.test_data_extended import load_extended_data
 
 app = Flask(__name__)
 
