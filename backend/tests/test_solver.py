@@ -8,11 +8,11 @@ from datetime import time
 
 import pytest
 
-from backend.src.enums import Day, Grade, PositionType, Semester
-from backend.src.scheduling import TimeSlot, has_conflict
-from backend.src.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
-from backend.src.csp_solver import CSPSolver, SolverConfig, build_slots
-from backend.src.test_data_extended import load_extended_data
+from ta_assignment.enums import Day, Grade, PositionType, Semester
+from ta_assignment.scheduling import TimeSlot, has_conflict
+from ta_assignment.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
+from ta_assignment.csp_solver import CSPSolver, SolverConfig, build_slots
+from ta_assignment.test_data_extended import load_extended_data
 
 @pytest.fixture(scope="module")
 def data():
