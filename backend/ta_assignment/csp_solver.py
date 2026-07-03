@@ -34,6 +34,7 @@ from .applicants import Applicant
 from .applications import Application, Assignment
 from .courses import Section
 from .enums import PositionType
+from .locks import Lock, LockType
 from .scoring import EligibilityConfig, ScoringStrategy, DefaultScoringStrategy, check_eligibility
 
 
@@ -78,7 +79,7 @@ class SolverConfig:
     eligibility: EligibilityConfig = field(default_factory=EligibilityConfig)
     scorer: ScoringStrategy = field(default_factory=DefaultScoringStrategy)
     max_nodes: int = 300_000 # safety value on the backtracking search
-
+    locks: List[Lock] = field(default_factory=list)
 
 @dataclass
 class SolverResult:
@@ -87,6 +88,7 @@ class SolverResult:
     total_score: float
     nodes_explored: int
     optimal: bool # False if max_nodes was hit before search was completed
+    lock_conflicts: List[str] = field(default_factory=list) # locks that couldn't be honored, and why
 
     def __str__(self):
         lines = [f"Total score: {self.total_score:.2f} "
@@ -98,6 +100,10 @@ class SolverResult:
             lines.append("  Unfilled:")
             for s in self.unfilled_slots:
                 lines.append(f"    {s}")
+        if self.lock_conflicts:
+            lines.append(". Lock conflicts:")
+            for c in self.lock_conflicts:
+                lines.append(f"    {c}")
         return "\n".join(lines)
     
 
@@ -113,6 +119,12 @@ class CSPSolver:
         self.config = config or SolverConfig()
 
         self.slots: List[SlotSpec] = build_slots(sections)
+        # (applicant_id, section_id_ position) tuples an admin has explicitly
+        # forbidden -- excluded from every slot's candidate list below.
+        self.blocked_pairs = {
+            (l.applicant_id, l.section_id, l.position)
+            for l in self.config.locks if l.lock_type == LockType.BLOCKED
+        }
         # slot_id -> list[(applicant_id, score)], sorted best-score-first
         self.candidates: Dict[str, List[Tuple[str, float]]] = self._build_candidate_table()
 
@@ -130,6 +142,8 @@ class CSPSolver:
                 application = self.apps_by_id.get(applicant.applicant_id)
                 if application is None:
                     continue
+                if (applicant.applicant_id, slot.section.section_id, slot.position) in self.blocked_pairs:
+                    continue
                 result = check_eligibility(
                     applicant, application, slot.section, slot.position,
                     self.config.eligibility
@@ -141,9 +155,59 @@ class CSPSolver:
             table[slot.slot_id] = candidates
         return table
     
+
+    def _resolve_locks(self) -> Tuple[Dict[SlotSpec, Tuple[str, float]], List[str]]:
+        """Pre-assigns every LOCKED applicant to one of their target
+        sections+position's slots (any of them -- they're interchangable).
+        Returns the resolved assignments plus human-readable conflict
+        messages for locks that couldn't be honored (unknown applicant,
+        contradicts a block, applicant double-locked, or no open slot left
+        for that section+position)."""
+        locked_list = [l for l in self.config.locks if l.lock_type == LockType.LOCKED]
+        if not locked_list:
+            return {}, []
+        
+        slots_by_key: Dict[Tuple[str, PositionType], List[SlotSpec]] = {}
+        for slot in self.slots:
+            slots_by_key.setdefault((slot.section.section_id, slot.position), []).append(slot)
+
+        resolved: Dict[SlotSpec, Tuple[str, float]] = {}
+        conflicts: List[str] = []
+        seen_applicants: set = set()
+
+        for lock in locked_list:
+            label = f"{lock.applicant_id} -> {lock.section_id} ({lock.position.name})"
+            applicant = self.applicants.get(lock.applicant_id)
+            application = self.apps_by_id.get(lock.applicant_id)
+            if applicant is None or application is None:
+                conflicts.append(f"{label}: unknown applicant")
+                continue
+            if (lock.applicant_id, lock.section_id, lock.position) in self.blocked_pairs:
+                conflicts.append(f"{label}: contradicts an existing block on the same slot")
+                continue
+            if lock.applicant_id in seen_applicants:
+                conflicts.append(f"{label}: applicant is already locked into another slot")
+                continue
+            available = [s for s in slots_by_key.get((lock.section_id, lock.position), []) if s not in resolved]
+            if not available:
+                conflicts.append(f"{label}: no open slot remaining for this section/position")
+                continue
+            slot = available[0]
+            score = self.config.scorer.score(applicant, application, slot.section, slot.position)
+            resolved[slot] = (lock.applicant_id, score)
+            seen_applicants.add(lock.applicant_id)
+        
+        return resolved, conflicts
+
     def solve(self) -> SolverResult:
-        # MRV ordering: fewest eligible candidates first.
-        order = sorted(self.slots, key=lambda s: len(self.candidates[s.slot_id]))
+        locked_assignments, lock_conflicts = self._resolve_locks()
+
+        # Locked slots are pre-decided; the backtracking search below only
+        # runs over whats left. MRV ordering: fewest eligible candidates first.
+        order = sorted(
+            (s for s in self.slots if s not in locked_assignments),
+            key=lambda s: len(self.candidates[s.slot_id]),
+        )
 
         # Suffix upper bounds for branch-and-bound: suffix_upper[i] is the
         # most additional score achievable from slots order [i:], ignoring the
@@ -155,23 +219,28 @@ class CSPSolver:
             best_here = cands[0][1] if cands else 0.0
             suffix_upper[i] = suffix_upper[i + 1] + max(best_here, 0.0)
 
-        used_applicants: set = set()
+        # Locked applicants are unavailable to every free slot too.
+        used_applicants: set = {aid for aid, _ in locked_assignments.values()}
         current: Dict[SlotSpec, Tuple[str, float]] = {}
         self._backtrack(order, 0, used_applicants, current, 0.0, suffix_upper)
+
+        final_assignment = {**self._best_assignment, **locked_assignments}
+        locked_total = sum(score for _, score in locked_assignments.values())
 
         assignments = [
             Assignment(applicant_id=aid, section_id=slot.section.section_id,
                        position=slot.position, score=score)
-            for slot, (aid, score) in self._best_assignment.items()
+            for slot, (aid, score) in final_assignment.items()
         ]
-        unfilled = [s for s in self.slots if s not in self._best_assignment]
+        unfilled = [s for s in self.slots if s not in final_assignment]
 
         return SolverResult(
             assignments=assignments,
             unfilled_slots=unfilled,
-            total_score=max(self._best_score, 0.0),
+            total_score=max(self._best_score, 0.0) + locked_total,
             nodes_explored=self._nodes_explored,
             optimal=not self._hit_node_limit,
+            lock_conflicts=lock_conflicts,
         )
 
     def _backtrack(self, order, idx, used, current, current_score, suffix_upper):

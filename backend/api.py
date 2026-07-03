@@ -28,6 +28,7 @@ from ta_assignment.db import repository as repo
 from ta_assignment.db.seed import SEED_LOADERS, ensure_seeded, reset_dataset
 from ta_assignment.db.session import get_db, init_db
 from ta_assignment.enums import PositionType
+from ta_assignment.locks import LockType
 from ta_assignment.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
 from ta_assignment.csp_solver import CSPSolver, SolverConfig
 
@@ -199,6 +200,7 @@ class SolveRequest(BaseModel):
     min_gpa: Optional[float] = None
     min_gpa_uta: Optional[float] = None
     weights: ScoringWeights = ScoringWeights()
+    ignore_locks: bool = False  # preview an unconstrained solve for comparison
 
 
 @app.post("/api/solve")
@@ -207,13 +209,14 @@ def api_solve(req: SolveRequest, db: Session = Depends(get_db)):
     sections = repo.get_sections(db, req.dataset)
     applicants = repo.get_applicants(db, req.dataset)
     applications = {a.applicant_id: repo.get_application(db, req.dataset, a.applicant_id) for a in applicants.values()}
+    locks = [] if req.ignore_locks else repo.get_locks(db, req.dataset)
 
     eli_config = EligibilityConfig(min_gpa=req.min_gpa, min_gpa_uta=req.min_gpa_uta)
     scorer = DefaultScoringStrategy(**req.weights.model_dump())
 
     solver = CSPSolver(
         applicants, applications, sections,
-        config=SolverConfig(eligibility=eli_config, scorer=scorer),
+        config=SolverConfig(eligibility=eli_config, scorer=scorer, locks=locks),
     )
     result = solver.solve()
 
@@ -233,6 +236,7 @@ def api_solve(req: SolveRequest, db: Session = Depends(get_db)):
             for a in result.assignments
         ],
         "unfilled_slots": [s.slot_id for s in result.unfilled_slots],
+        "lock_conflicts": result.lock_conflicts,
     }
 
 
@@ -476,3 +480,69 @@ def update_applicant(applicant_id: str, payload: ApplicantUpdate, dataset: str =
 def delete_applicant(applicant_id: str, dataset: str = Query("demo"), db: Session = Depends(get_db)):
     if not repo.delete_applicant(db, dataset, applicant_id):
         raise HTTPException(status_code=404, detail=f"Applicant '{applicant_id}' not found in '{dataset}'")
+
+
+# ---------------------------------------------------------------------------
+# Lock / block CRUD
+#
+# A lock pins an applicant into a (section, position); a block forbids one.
+# Both apply at the section+position level (not a specific slot_index --
+# see ta_assignment/locks.py). Persisted per-dataset, and automatically
+# applied every time /api/solve runs for that dataset (pass
+# `ignore_locks: true` in the solve request to preview without them).
+# ---------------------------------------------------------------------------
+
+class LockCreate(BaseModel):
+    applicant_id: str
+    section_id: str
+    position: str       # "LA" | "UTA"
+    lock_type: str     # "locked" | "blocked"
+
+
+def _serialize_lock(row) -> dict:
+    return {
+        "id": row.id,
+        "applicant_id": row.applicant_id,
+        "section_id": row.section_id,
+        "position": row.position,
+        "lock_type": row.lock_type,
+    }
+
+
+@app.get("/api/locks")
+def list_locks(dataset: str = Query("demo"), db: Session = Depends(get_db)):
+    ensure_seeded(db, dataset)
+    return {"locks": [_serialize_lock(r) for r in repo.list_lock_rows(db, dataset)]}
+
+
+@app.post("/api/locks", status_code=201)
+def create_lock(payload: LockCreate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+    ensure_seeded(db, dataset)
+
+    if payload.position not in {p.name for p in PositionType}:
+        raise HTTPException(status_code=400, detail="position must be 'LA' or 'UTA'" )
+    if payload.lock_type not in {lt.value for lt in LockType}:
+        raise HTTPException(status_code=400, detail="lock_type must be 'locked' or 'blocked'")
+    if payload.applicant_id not in repo.get_applicants(db, dataset):
+        raise HTTPException(status_code=400, detail=f"Applicant '{payload.applicant_id}' not found in '{dataset}'")
+    if payload.section_id not in {s.section_id for s in repo.get_sections(db, dataset)}:
+        raise HTTPException(status_code=400, detail=f"Section '{payload.section_id}' not found in '{dataset}'")
+    
+    existing = [
+        r for r in repo.list_lock_rows(db, dataset)
+        if r.applicant_id == payload.applicant_id and r.section_id == payload.section_id and r.position == payload.position
+    ]
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="A lock/block already exists for this applicant + section + position. Delete it first.",
+        )
+    
+    row = repo.create_lock(db, dataset, payload.applicant_id, payload.section_id, payload.position, payload.lock_type)
+    return _serialize_lock(row)
+
+
+@app.delete("/api/locks/{lock_id}", status_code=204)
+def delete_lock(lock_id: int, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+    if not repo.delete_lock(db, dataset, lock_id):
+        raise HTTPException(status_code=404, detail=f"Lock {lock_id} not found in '{dataset}'")
