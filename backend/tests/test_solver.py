@@ -1,7 +1,7 @@
 """Pytest suite build on top of `src.test_data_extended`.
 
 Run with:
-    python -m pytest tests/ -v
+    python -m pytest backend/tests/ -v
 """
 
 from datetime import time
