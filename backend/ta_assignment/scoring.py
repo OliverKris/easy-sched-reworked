@@ -21,7 +21,7 @@ from .scheduling import has_conflict
 @dataclass
 class EligibilityConfig:
     """Admin-tunable hard-constraint settings, applied across the whole
-    hiring cycle. Kept seperate from PostionRequirement since these are
+    hiring cycle. Kept seperate from PositionRequirement since these are
     deparment/admin-level policy knobs rather than per-section facts.
     """
     # Minimum overall GPA required to be eligible at all. None = no floor

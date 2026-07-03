@@ -13,8 +13,9 @@ from ..applicants import Applicant, PastCourseRecord, Recommendation, TeachingEx
 from ..applications import Application, CoursePreference
 from ..courses import Course, PositionRequirement, Section
 from ..enums import Grade, PositionType, Semester
+from ..locks import Lock, LockType
 from .json_shapes import dict_to_lab, dict_to_timeslot, lab_to_dict, timeslot_to_dict
-from .models import ApplicantModel, ApplicationModel, CourseModel, SectionModel
+from .models import ApplicantModel, ApplicationModel, CourseModel, LockModel, SectionModel
 
 def _course_from_row(row: CourseModel) -> Course:
     return Course(
@@ -105,6 +106,25 @@ def get_applicants(db: Session, dataset: str) -> Dict[str, Applicant]:
 def get_applications(db: Session, dataset: str) -> List[Application]:
     rows = db.scalars(select(ApplicationModel).where(ApplicationModel.dataset == dataset)).all()
     return [_application_from_row(row) for row in rows]
+
+
+def get_locks(db: Session, dataset: str) -> List[Lock]:
+    """Domain Lock objects, ready to hand to SolverConfig(locks=...)."""
+    rows = db.scalar(select(LockModel).where(LockModel.dataset == dataset)).all()
+    return [
+        Lock(
+            applicant_id=row.applicant_id,
+            section_id=row.section_id,
+            position=PositionType[row.position],
+            lock_type=LockType(row.lock_type),
+        )
+        for row in rows
+    ]
+
+
+def list_lock_rows(db: Session, dataset: str) -> List[LockModel]:
+    """Raw rows (with their db id, needed for delete-by-id from the API)."""
+    return db.scalars(select(LockModel).where(LockModel.dataset == dataset)).all()
 
 
 def dataset_is_empty(db: Session, dataset: str) -> bool:
@@ -233,6 +253,25 @@ def delete_applicant(db: Session, dataset: str, applicant_id: str) -> bool:
     db.execute(
         delete(ApplicationModel).where(ApplicationModel.dataset == dataset, ApplicationModel.applicant_id == applicant_id)
     )
+    db.delete(row)
+    db.commit()
+    return True
+
+
+# -- Locks ------------------------------------------------------------------
+
+def create_lock(db: Session, dataset: str, applicant_id: str, section_id: str, position: str, lock_type: str) -> LockModel:
+    row = LockModel(dataset=dataset, applicant_id=applicant_id, section_id=section_id, position=position, lock_type=lock_type)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_lock(db: Session, dataset: str, lock_id: int) -> bool:
+    row = db.scalar(select(LockModel).where(LockModel.dataset == dataset, LockModel.id == lock_id))
+    if row is None:
+        return False
     db.delete(row)
     db.commit()
     return True

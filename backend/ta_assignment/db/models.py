@@ -98,11 +98,22 @@ class ApplicationModel(Base):
 
 
 class LockModel(Base):
-    """Reserved for the upcoming lock/block-constraint feature: pins or
-    forbids a specific applicant from a specific (section, position) slot.
-    Not yet read by the solver -- added now so the schema doesn't need a
-    migration when that feature lands."""
+    """An admin-placed constraint: pins (locked) or forbids (blocked) a
+    specific applicant from a specific (section, position). Read by the
+    solver via ta_assignment.locks.Lock / ta_assignment.csp_solver.
+    
+    `section_id` stored the domain Section.section_id string (e.g
+    "CSCI 1012-10 (Fall 2026)") rather than SectionModel's integer PK --
+    that's the same key Assignment/SlotSpec/the eligibility API already use
+    everywhere else, so no join is needed to resolve a lock at solve time.
+    """
     __tablename__ = "locks"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset", "applicant_id", "section_id", "position",
+            name="uq_lock_dataset_applicant_section_position"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     dataset: Mapped[str] = mapped_column(String, index=True)
