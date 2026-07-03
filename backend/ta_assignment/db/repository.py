@@ -17,12 +17,17 @@ from ..locks import Lock, LockType
 from .json_shapes import dict_to_lab, dict_to_timeslot, lab_to_dict, timeslot_to_dict
 from .models import ApplicantModel, ApplicationModel, CourseModel, LockModel, SectionModel
 
+
+# ---------------------------------------------------------------------------
+# Reads: ORM row -> domain dataclass
+# ---------------------------------------------------------------------------
+
 def _course_from_row(row: CourseModel) -> Course:
     return Course(
         course_id=row.course_id,
         title=row.title,
         description=row.description,
-        skills=row.skills,
+        skills=set(row.skills),
     )
 
 
@@ -108,9 +113,22 @@ def get_applications(db: Session, dataset: str) -> List[Application]:
     return [_application_from_row(row) for row in rows]
 
 
+def get_application(db: Session, dataset: str, applicant_id: str) -> Optional[Application]:
+    """Single applicant's Application row, or None if they don't have one
+    (shouldn't normally happen -- every Applicant is created with a linked
+    Application -- but callers treat a missing one as 'no application on
+    file' rather than crashing)."""
+    row = db.scalar(
+        select(ApplicationModel).where(
+            ApplicationModel.dataset == dataset, ApplicationModel.applicant_id == applicant_id
+        )
+    )
+    return _application_from_row if row is not None else None
+
+
 def get_locks(db: Session, dataset: str) -> List[Lock]:
     """Domain Lock objects, ready to hand to SolverConfig(locks=...)."""
-    rows = db.scalar(select(LockModel).where(LockModel.dataset == dataset)).all()
+    rows = db.scalars(select(LockModel).where(LockModel.dataset == dataset)).all()
     return [
         Lock(
             applicant_id=row.applicant_id,

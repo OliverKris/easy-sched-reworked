@@ -25,7 +25,7 @@ export function fetchEligibility(
     minGpaUta?: number | null,
 ): Promise<EligibilityResponse> {
     const params = new URLSearchParams({ dataset });
-    if (minGpa !== null && minGpa !== undefined) params.set("min_pga", String(minGpa));
+    if (minGpa !== null && minGpa !== undefined) params.set("min_gpa", String(minGpa));
     if (minGpaUta !== null && minGpaUta !== undefined) params.set("min_gpa_uta", String(minGpaUta));
     return getJSON(`/api/eligibility?${params.toString()}`);
 }
@@ -43,9 +43,9 @@ export async function runSolve(params: SolveParams): Promise<SolveResponse> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             dataset: params.dataset,
-            min_pga: params.minGpa ?? null,
+            min_gpa: params.minGpa ?? null,
             min_gpa_uta: params.minGpaUta ?? null,
-            weight: params.weights,
+            weights: params.weights,
         }),
     });
     if (!res.ok) {
