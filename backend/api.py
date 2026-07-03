@@ -8,7 +8,7 @@ Run with (from backend/):
     pip install -r requirements.txt
     uvicorn api:app --reload --port 8000
     
-Docs at http://127.0.0.1: 8000/docs (FastAPI's auto-generated Swagger UI).
+Docs at http://127.0.0.1:8000/docs (FastAPI's auto-generated Swagger UI).
 """
 
 from typing import Optional
@@ -35,14 +35,14 @@ app.add_middleware(
 )
 
 DATASETS = {
-    "demo": load_demo_data(),
-    "extended": load_extended_data(),
+    "demo": load_demo_data,
+    "extended": load_extended_data,
 }
 
 def get_dataset(name: str):
     loader = DATASETS.get(name)
     if loader is None:
-        raise HTTPException(status_code=404, detail=f"Dataset {name} not found")
+        raise HTTPException(status_code=404, detail=f"Unknown dataset '{name}'")
     courses, sections, applicants, applications = loader()
     apps_by_id = {a.applicant_id: a for a in applications}
     return courses, sections, applicants, applications, apps_by_id
@@ -115,7 +115,7 @@ def api_datasets():
     return {"datasets": list(DATASETS.keys())}
 
 
-@app.get("api/dataset")
+@app.get("/api/dataset")
 def api_dataset(dataset: str = Query("demo")):
     """Everything the frontend needs for the browse views in one call."""
     courses, sections, applicants, applications, apps_by_id = get_dataset(dataset)
@@ -148,7 +148,7 @@ def api_eligibility(
                 continue
             for position in (PositionType.LA, PositionType.UTA):
                 result = check_eligibility(
-                    applicant, application, section, position, config, scorer
+                    applicant, application, section, position, config
                 )
                 cell = {
                     "applicant_id": applicant.applicant_id,
@@ -159,13 +159,12 @@ def api_eligibility(
                     "score": (
                         round(scorer.score(applicant, application, section, position), 2)
                         if result.eligible else None
-                    )
+                    ),
                 }
                 cells.append(cell)
-            rows.append({"section_id": section.section_id, "cells": cells})
+        rows.append({"section_id": section.section_id, "cells": cells})
         
-        return {"dataset": dataset, "rows": rows}
-    
+    return {"dataset": dataset, "rows": rows}
 
 @app.post("/api/solve")
 def api_solve(req: SolveRequest):
