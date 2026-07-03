@@ -205,10 +205,10 @@ class SolveRequest(BaseModel):
 
 @app.post("/api/solve")
 def api_solve(req: SolveRequest, db: Session = Depends(get_db)):
-    ensure_seeded(get_db(), req.dataset)
+    ensure_seeded(db, req.dataset)
     sections = repo.get_sections(db, req.dataset)
     applicants = repo.get_applicants(db, req.dataset)
-    applications = {a.applicant_id: repo.get_application(db, req.dataset, a.applicant_id) for a in applicants.values()}
+    applications = repo.get_applications(db, req.dataset)
     locks = [] if req.ignore_locks else repo.get_locks(db, req.dataset)
 
     eli_config = EligibilityConfig(min_gpa=req.min_gpa, min_gpa_uta=req.min_gpa_uta)

@@ -118,6 +118,6 @@ class LockModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     dataset: Mapped[str] = mapped_column(String, index=True)
     applicant_id: Mapped[str] = mapped_column(String, index=True)
-    section_id: Mapped[int] = mapped_column(Integer, index=True)  # -> SectionModel.id
+    section_id: Mapped[int] = mapped_column(String, index=True)
     position: Mapped[str] = mapped_column(String)   # "LA" | "UTA"
     lock_type: Mapped[str] = mapped_column(String)  # "locked" | "blocked"
