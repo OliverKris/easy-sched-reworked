@@ -1,10 +1,11 @@
-export type ViewKey = "sections" | "applicants" | "eligibility" | "solver";
+export type ViewKey = "sections" | "applicants" | "eligibility" | "solver" | "board";
 
 const TABS: { key: ViewKey, label: string, index: string }[] = [
     { key: "sections", label: "Sections", index: "01" },
     { key: "applicants", label: "Applicants", index: "02" },
     { key: "eligibility", label: "Eligibility Ledger", index: "03" },
     { key: "solver", label: "Run Solver", index: "04" },
+    { key: "board", label: "Assignment Board", index: "05"},
 ]
 
 interface Props {

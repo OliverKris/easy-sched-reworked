@@ -91,7 +91,7 @@ export function SolverView({ dataset }: { dataset: DatasetKey }) {
                 disabled={loading}
                 className="bg-forest hover:bg-forest-hover text-white font-semibold text-[13px] rounded px-5 py-2.5 disabled:opacity-60"
             >
-                {loading ? "Solving..." : "Slove assignment"}
+                {loading ? "Solving..." : "Solve assignment"}
             </button>
 
             <div className="mt-6">

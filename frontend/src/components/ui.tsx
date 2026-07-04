@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 export function Pill({ children, tone = "forest" }: { children: ReactNode; tone?: "forest" | "brass" | "brick" }) {
     const tones = {
-        forest: "bg-forest-soft text-forst",
+        forest: "bg-forest-soft text-forest",
         brass: "bg-brass-soft text-brass",
         brick: "bg-brick-soft text-brick",
     };

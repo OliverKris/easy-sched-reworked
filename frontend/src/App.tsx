@@ -7,6 +7,7 @@ import { SectionsView } from './components/SectionsView'
 import { ApplicantsView } from './components/ApplicantsView'
 import { EligibilityView } from './components/EligibilityView'
 import { SolverView } from './components/SolverView'
+import { BoardView } from './components/BoardView'
 import { EmptyState } from './components/ui'
 
 function App() {
@@ -46,6 +47,7 @@ function App() {
             {view === "applicants" && <ApplicantsView applicants={data.applicants} />}
             {view === "eligibility" && <EligibilityView dataset={dataset} sections={data.sections} />}
             {view === "solver" && <SolverView dataset={dataset} />}
+            {view === "board" && <BoardView dataset={dataset} sections={data.sections} applicants={data.applicants} />}
           </>
         )}
       </main>

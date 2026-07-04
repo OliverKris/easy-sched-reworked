@@ -123,7 +123,7 @@ def get_application(db: Session, dataset: str, applicant_id: str) -> Optional[Ap
             ApplicationModel.dataset == dataset, ApplicationModel.applicant_id == applicant_id
         )
     )
-    return _application_from_row if row is not None else None
+    return _application_from_row(row) if row is not None else None
 
 
 def get_locks(db: Session, dataset: str) -> List[Lock]:
