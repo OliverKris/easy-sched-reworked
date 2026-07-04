@@ -97,3 +97,83 @@ export interface SolveResponse {
     assignments: Assignment[];
     unfilled_slots: string[];
 }
+
+// Locks / Blocks
+
+export type LockKind = "locked" | "blocked";
+
+export interface Lock {
+    id: number;
+    applicant_id: string;
+    section_id: string;
+    position: "LA" | "UTA";
+    lock_type: LockKind;
+}
+
+export interface LockCreate {
+    applicant_id: string;
+    section_id: string;
+    position: "LA" | "UTA";
+    lock_type: LockKind;
+}
+
+// Recommendations
+
+export interface RecommendationCandidate {
+    applicant_id: string;
+    applicant_name: string;
+    gpa: number | null;
+    score: number;
+}
+
+export interface RecommendationsResponse {
+    section_id: string;
+    position: "LA" | "UTA";
+    recommendations: RecommendationCandidate[];
+}
+
+// CRUD payloads
+
+export interface TimeSlotIn {
+    day: "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
+    start: string; // "HH:MM"
+    end: string;   // "HH:MM"
+    label?: string;
+}
+
+export interface LabIn {
+    lab_id: string;
+    meetings: TimeSlotIn[];
+    capacity?: number | null;
+}
+
+export interface CourseCreate {
+    course_id: string;
+    title: string;
+    description?: string;
+    skills?: string[];
+}
+
+export interface CourseUpdate {
+    title?: string | null;
+    description?: string | null;
+    skills?: string[] | null;
+}
+
+export interface SectionCreate {
+    course_id: string;
+    section_number: string;
+    term: "FALL" | "SPRING";
+    year: number;
+    instructor?: string;
+    lecture_meetings?: TimeSlotIn[];
+    labs?: LabIn[];
+    la_count?: number;
+    uta_count?: number;
+    la_hours_per_week?: number;
+    uta_hours_per_week?: number;
+    uta_must_attend_lecture?: boolean;
+    la_must_attend_lecture?: boolean;
+}
+
+export type SectionUpdate = Partial<Omit<SectionCreate, "course_id">>;

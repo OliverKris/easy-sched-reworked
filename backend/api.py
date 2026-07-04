@@ -546,3 +546,75 @@ def create_lock(payload: LockCreate, dataset: str = Query("demo"), db: Session =
 def delete_lock(lock_id: int, dataset: str = Query("demo"), db: Session = Depends(get_db)):
     if not repo.delete_lock(db, dataset, lock_id):
         raise HTTPException(status_code=404, detail=f"Lock {lock_id} not found in '{dataset}'")
+
+
+# ---------------------------------------------------------------------------
+# Recommendations: top-N eligible candidates for one open (section, position)
+# slot, for the admin's "quick lock" workflow. Lock-aware -- excludes anyone
+# already LOCKED into any slot (they're spokem for, can only hold one
+# position) and anyone BLOCKED from this exact slot, so every name returned
+# here is genuinely available to lock in right now.
+# ---------------------------------------------------------------------------
+
+@app.get("/api/recommendations")
+def api_recommendations(
+    section_id: str = Query(..., description="Section.section_id, e.g. 'CSCI 1012-10 (Fall 2026)'"),
+    position: str = Query(..., description="'LA' or 'UTA'"),
+    limit: int = Query(5, ge=1, le=50),
+    min_gpa: Optional[float] = Query(None),
+    min_gpa_uta: Optional[float] = Query(None),
+    dataset: str = Query("demo"),
+    db: Session = Depends(get_db),
+):
+    ensure_seeded(db, dataset)
+    if position not in {p.name for p in PositionType}:
+        raise HTTPException(status_code=400, detail="position must be 'LA' or 'UTA'")
+    
+    sections = repo.get_sections(db, dataset)
+    section = next((s for s in sections if s.section_id == section_id), None)
+    if section is None:
+        raise HTTPException(status_code=404, detail=f"Section `{section_id}` not found in `{dataset}`")
+    
+    applicants = repo.get_applicants(db, dataset)
+    applications = repo.get_applications(db, dataset)
+    apps_by_id = {a.applicant_id: a for a in applications}
+    locks = repo.get_locks(db, dataset)
+    pos = PositionType[position]
+
+    # Anyone LOCKED into any slot is unavailable everywhere else (one
+    # position per person). Anyone BLOCKED specifically from this
+    # section+position is unavailable here only.
+    locked_elsewhere = {l.applicant_id for l in locks if l.lock_type == LockType.LOCKED}
+    blocked_here = {
+        l.applicant_id for l in locks
+        if l.lock_type == LockType.BLOCKED and l.section_id == section_id and l.position == pos
+    }
+
+    config = EligibilityConfig(min_gpa=min_gpa, min_gpa_uta=min_gpa_uta)
+    scorer = DefaultScoringStrategy()
+
+    candidates = []
+    for applicant in applicants.values():
+        if applicant.applicant_id in locked_elsewhere or applicant.applicant_id in blocked_here:
+            continue
+        application = apps_by_id.get(applicant.applicant_id)
+        if application is None:
+            continue
+        result = check_eligibility(applicant, application, section, pos, config)
+        if not result.eligible:
+            continue
+        score = scorer.score(applicant, application, section, pos)
+        gpa = applicant.overall_gpa
+        candidates.append({
+            "applicant_id": applicant.applicant_id,
+            "applicant_name": applicant.name,
+            "gpa": round(gpa, 2) if gpa is not None else None,
+            "score": round(score, 2),
+        })
+
+    candidates.sort(key=lambda c:  -c["score"])
+    return {
+        "section_id": section_id,
+        "position": position,
+        "recommendations": candidates[:limit],
+    }
