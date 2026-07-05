@@ -302,7 +302,7 @@ function SlotGroup({
                     </button>
                 )}
             </div>
-            <div ref={setNodeRef} className={`flex flex-col gap-1.5 min-h-[2.25rem] rounded-md p-1 ${isOver ? "bg-forest-soft" : ""}`}>
+            <div ref={setNodeRef} className={`flex flex-col gap-1.5 min-h-9 rounded-md p-1 ${isOver ? "bg-forest-soft" : ""}`}>
                 {lockedList.map((l) => (
                     <div key={l.id} className="flex items-center justify-between bg-forest-soft text-forest text-[12.5px] rounded px-2 py-1">
                         <span>{applicantsById[l.applicant_id]?.name ?? l.applicant_id}</span>
