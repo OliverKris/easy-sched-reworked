@@ -92,8 +92,20 @@ App: https://localhost:5173
 
 ```bash
 cd backend
-pytest
+python -m pytest
 ```
+
+The suite includes golden regression tests (`tests/test_golden.py`) that re-run the solver on fixed inputs and compare against snapshots in `tests/golden/`. After an intentional behaviour change, regenerate them with `python -m benchmarks.golden --update` and review the diff.
+
+### Benchmarks
+
+```bash
+cd backend
+python -m benchmarks.run                                  # small, medium, large x 3 seeds
+python -m benchmarks.run --sizes xlarge --seeds 1 2 3 --csv results.csv
+```
+
+Instances come from a seeded generator (`benchmarks/generator.py`), so every run uses identical data. The runner reports candidate-table build time, search time, nodes explored, score, slots filled, and whether the node budget was hit. With scipy installed it also reports `ref`, the exact optimum from a maximum-weight bipartite matching (`benchmarks/reference.py`), and `gap`, how far the solver's answer falls below it.
 
 ## Project Structure
 
@@ -106,6 +118,8 @@ pytest
 │       ├── locks.py            # Admin overrides
 │       ├── scheduling.py       # Conflict detection
 │       └── db/                 # Models, repository, seeding
+│   ├── benchmarks/             # Data generator, benchmark runner, golden snapshots
+│   └── tests/golden/           # Expected solver output for regression tests
 ├── frontend/
 │   └── src/
 │       ├── components/         # Views (Sections, Applicants, Board, Solver...)
