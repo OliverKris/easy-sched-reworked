@@ -5,24 +5,29 @@
   "hard_rules": [
     {
       "id": "applied",
+      "label": "Applied for the position",
       "rule": "applied_for_position"
     },
     {
       "id": "passed-course",
+      "label": "Passed the course",
       "rule": "passed_course"
     },
     {
       "id": "lecture",
+      "label": "Lecture conflict",
       "rule": "no_lecture_conflict",
       "when": "if_required"
     },
     {
       "id": "lab",
+      "label": "Lab conflict",
       "rule": "conflict_free_lab",
       "allow_no_labs": false
     },
     {
       "id": "min-gpa",
+      "label": "GPA",
       "rule": "cmp",
       "positions": [
         "LA"
@@ -34,6 +39,7 @@
     },
     {
       "id": "min-gpa-uta",
+      "label": "UTA GPA",
       "rule": "cmp",
       "positions": [
         "UTA"
@@ -75,6 +81,7 @@
     },
     {
       "id": "uta-readiness",
+      "label": "UTA readiness",
       "term": "bonus",
       "weight": 1.5,
       "positions": [

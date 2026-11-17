@@ -16,7 +16,7 @@ Docs at http://127.0.0.1:8000/docs (FastAPI's auto-generated Swagger UI).
 """
 
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import Literal, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,8 +30,13 @@ from ta_assignment.db.session import get_db, init_db
 from ta_assignment.enums import PositionType
 from ta_assignment.locks import LockType
 from ta_assignment.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
-from ta_assignment.csp_solver import SolverConfig
+from ta_assignment.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
+from ta_assignment.csp_solver import CSPSolver, SolverConfig
 from ta_assignment.matching_solver import MatchingSolver
+from ta_assignment.rules import compile_profile
+from ta_assignment.rules.legacy import profile_from_legacy
+from solve_view import build_solve_view
+import time
 
 
 @asynccontextmanager
@@ -202,6 +207,7 @@ class SolveRequest(BaseModel):
     min_gpa_uta: Optional[float] = None
     weights: ScoringWeights = ScoringWeights()
     ignore_locks: bool = False  # preview an unconstrained solve for comparison
+    solver: Literal["matching", "csp"] = "matching"  # exact matching by default
 
 
 @app.post("/api/solve")
@@ -214,18 +220,32 @@ def api_solve(req: SolveRequest, db: Session = Depends(get_db)):
 
     eli_config = EligibilityConfig(min_gpa=req.min_gpa, min_gpa_uta=req.min_gpa_uta)
     scorer = DefaultScoringStrategy(**req.weights.model_dump())
+    # The UI's GPA fields and weight sliders become a department profile, so
+    # eligibility, scoring and the explanations all come from one rule set.
+    profile = compile_profile(profile_from_legacy(eli_config, scorer))
+    SolverClass = MatchingSolver if req.solver == "matching" else CSPSolver
 
-    solver = MatchingSolver(
+    started = time.perf_counter()
+    solver = SolverClass(
         applicants, applications, sections,
-        config=SolverConfig(eligibility=eli_config, scorer=scorer, locks=locks),
+        config=SolverConfig(profile=profile, locks=locks),
     )
     result = solver.solve()
+    elapsed_ms = (time.perf_counter() - started) * 1000
+
+    apps_by_id = {a.applicant_id: a for a in applications}
+    view = build_solve_view(solver, result, profile, applicants, apps_by_id, locks)
 
     return {
         "dataset": req.dataset,
+        "solver": req.solver,
+        "elapsed_ms": round(elapsed_ms, 1),
         "total_score": round(result.total_score, 2),
         "nodes_explored": result.nodes_explored,
         "optimal": result.optimal,
+        "filled": view["filled"],
+        "total_slots": view["total_slots"],
+        "slots": view["slots"],
         "assignments": [
             {
                 "applicant_id": a.applicant_id,

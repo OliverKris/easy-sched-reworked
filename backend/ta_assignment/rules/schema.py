@@ -44,6 +44,7 @@ class _Scoped(_Base):
     """Optional scope shared by every rule and term. Out of scope = rule is skipped
     (a hard rule passes, a scoring term adds nothing)."""
     id: Optional[str] = None
+    label: Optional[str] = None                      # human-readable name shown in the UI
     positions: Optional[List[PositionType]] = None   # e.g. ["UTA"]
     courses: Optional[List[str]] = None              # e.g. ["CSCI 1111"]
 

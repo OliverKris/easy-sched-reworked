@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: pip install pytest pydantic sqlalchemy fastapi numpy scipy
+        run: pip install pytest pydantic sqlalchemy fastapi numpy scipy httpx
       - name: Run tests (unit + golden regression)
         run: python -m pytest -v
       - name: Smoke-run the benchmark

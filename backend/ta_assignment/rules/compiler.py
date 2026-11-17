@@ -216,27 +216,66 @@ def _compile_term_body(term) -> TermFn:
 
 # --- public API --------------------------------------------------------------
 
+_TERM_LABELS = {
+    "course_grade": "Grade in course",
+    "teaching_experience": "Teaching experience",
+    "recommendation_strength": "Recommendations",
+    "preference_rank": "Preference",
+    "skill_overlap": "Skill match",
+    "bonus": "Bonus",
+}
+
+
+def _rule_key(node, index: int) -> Tuple[str, str]:
+    """A stable (id, label) for a rule or term, for explanations and the UI."""
+    kind = getattr(node, "rule", None) or getattr(node, "term", None)
+    key = node.id or f"{kind}-{index}"
+    label = node.label or _TERM_LABELS.get(kind) or key.replace("-", " ").replace("_", " ").capitalize()
+    return key, label
+
+
 class Session:
     """Evaluates a compiled profile, caching applicant-only fields. One per solve."""
 
-    def __init__(self, rules: List[RuleFn], terms: List[TermFn]):
-        self._rules = rules
-        self._terms = terms
+    def __init__(self, rules, terms):
+        self._rules = rules      # list of (id, label, RuleFn)
+        self._terms = terms      # list of (id, label, TermFn)
         self._cache: Dict[Tuple[str, str], Optional[float]] = {}
+
+    def _ctx(self, applicant, application, section, position) -> _Ctx:
+        return _Ctx(applicant, application, section, position, self._cache)
 
     def check(self, applicant: Applicant, application: Application,
               section: Section, position: PositionType) -> EligibilityResult:
-        ctx = _Ctx(applicant, application, section, position, self._cache)
-        reasons = [r for r in (rule(ctx) for rule in self._rules) if r]
+        ctx = self._ctx(applicant, application, section, position)
+        reasons = [r for r in (fn(ctx) for _, _, fn in self._rules) if r]
         return EligibilityResult(eligible=not reasons, reasons=reasons)
+
+    def failing_rules(self, applicant: Applicant, application: Application,
+                      section: Section, position: PositionType) -> List[Tuple[str, str, str]]:
+        """Every failing hard rule as (rule id, rule label, reason). Empty = eligible."""
+        ctx = self._ctx(applicant, application, section, position)
+        out = []
+        for key, label, fn in self._rules:
+            reason = fn(ctx)
+            if reason:
+                out.append((key, label, reason))
+        return out
 
     def score(self, applicant: Applicant, application: Application,
               section: Section, position: PositionType) -> float:
-        ctx = _Ctx(applicant, application, section, position, self._cache)
+        ctx = self._ctx(applicant, application, section, position)
         total = 0.0
-        for term in self._terms:
-            total += term(ctx)
+        for _, _, fn in self._terms:
+            total += fn(ctx)
         return total
+
+    def explain(self, applicant: Applicant, application: Application,
+                section: Section, position: PositionType) -> List[Tuple[str, str, float]]:
+        """Each scoring term's contribution as (term id, label, points), in profile
+        order. The contributions add up to score() exactly."""
+        ctx = self._ctx(applicant, application, section, position)
+        return [(key, label, fn(ctx)) for key, label, fn in self._terms]
 
 
 class CompiledProfile:
@@ -244,8 +283,8 @@ class CompiledProfile:
 
     def __init__(self, profile: s.DepartmentProfile):
         self.profile = profile
-        self._rules = [_compile_rule(r) for r in profile.hard_rules]
-        self._terms = [_compile_term(t) for t in profile.scoring]
+        self._rules = [(*_rule_key(r, i), _compile_rule(r)) for i, r in enumerate(profile.hard_rules)]
+        self._terms = [(*_rule_key(t, i), _compile_term(t)) for i, t in enumerate(profile.scoring)]
 
     def new_session(self) -> Session:
         return Session(self._rules, self._terms)
