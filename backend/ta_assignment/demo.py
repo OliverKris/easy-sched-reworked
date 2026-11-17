@@ -3,6 +3,8 @@ and (if eligible) their score for LA and UTA. Run with:
     python -m src.demo
 """
 
+from backend.ta_assignment.matching_solver import MatchingSolver
+
 from .enums import PositionType
 from .scoring import EligibilityConfig, check_eligibility, DefaultScoringStrategy
 from .csp_solver import CSPSolver, SolverConfig
@@ -40,8 +42,8 @@ def main():
     print("############ ELIGIBILITY + SCORING (GPA threshold applied) ############")
     print_eligibility_matrix(sections, applicants, apps_by_id, elig_config, scorer)
 
-    print("\n\n############ CSP SOLVER: OPTIMAL ASSIGNMENT ############")
-    solver = CSPSolver(
+    print("\n\n############ MATCHING SOLVER: OPTIMAL ASSIGNMENT ############")
+    solver = MatchingSolver(
         applicants, applications, sections,
         config=SolverConfig(eligibility=elig_config, scorer=scorer),
     )

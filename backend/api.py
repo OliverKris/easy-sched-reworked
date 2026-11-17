@@ -30,7 +30,8 @@ from ta_assignment.db.session import get_db, init_db
 from ta_assignment.enums import PositionType
 from ta_assignment.locks import LockType
 from ta_assignment.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
-from ta_assignment.csp_solver import CSPSolver, SolverConfig
+from ta_assignment.csp_solver import SolverConfig
+from ta_assignment.matching_solver import MatchingSolver
 
 
 @asynccontextmanager
@@ -214,7 +215,7 @@ def api_solve(req: SolveRequest, db: Session = Depends(get_db)):
     eli_config = EligibilityConfig(min_gpa=req.min_gpa, min_gpa_uta=req.min_gpa_uta)
     scorer = DefaultScoringStrategy(**req.weights.model_dump())
 
-    solver = CSPSolver(
+    solver = MatchingSolver(
         applicants, applications, sections,
         config=SolverConfig(eligibility=eli_config, scorer=scorer, locks=locks),
     )
