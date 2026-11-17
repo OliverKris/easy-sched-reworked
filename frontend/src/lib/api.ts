@@ -11,6 +11,7 @@ import type {
     SectionCreate,
     SectionUpdate,
     SolveResponse,
+    SolverKind,
 } from "../types";
 
 // Generic async function for API requests
@@ -63,6 +64,7 @@ export interface SolveParams {
     minGpa?: number | null;
     minGpaUta?: number | null;
     weights: ScoringWeights;
+    solver?: SolverKind;
 }
 
 export async function runSolve(params: SolveParams): Promise<SolveResponse> {
@@ -74,6 +76,7 @@ export async function runSolve(params: SolveParams): Promise<SolveResponse> {
             min_gpa: params.minGpa ?? null,
             min_gpa_uta: params.minGpaUta ?? null,
             weights: params.weights,
+            solver: params.solver ?? "matching",
         }),
     });
     if (!res.ok) {

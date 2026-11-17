@@ -99,3 +99,33 @@ class TestResetDataset:
         reset_dataset(db, "extended")
         assert "CSCI 5000" not in repo.get_courses(db, "extended")
         assert len(repo.get_sections(db, "extended")) == 6
+
+
+def test_concurrent_ensure_seeded_seeds_once(tmp_path):
+    """Parallel first requests on a fresh database must not collide while seeding."""
+    import threading
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+    errors = []
+
+    def worker():
+        db = Session()
+        try:
+            ensure_seeded(db, "extended")
+        except Exception as e:  # pragma: no cover - the assertion reports it
+            errors.append(e)
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    db = Session()
+    assert len(repo.get_applicants(db, "extended")) == 14
+    db.close()

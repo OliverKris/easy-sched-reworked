@@ -89,13 +89,61 @@ export interface Assignment {
     score: number;
 }
 
+export type Position = "LA" | "UTA";
+export type SolverKind = "matching" | "csp";
+
+export interface ScorePart {
+    id: string;
+    label: string;
+    points: number;
+}
+
+export interface SlotAlternative {
+    applicant_id: string;
+    applicant_name: string;
+    score: number;
+    /** "section_id · LA|UTA" where this person was placed, or null if unplaced. */
+    placed_in: string | null;
+}
+
+export interface IneligibleExample {
+    applicant_id: string;
+    applicant_name: string;
+    reason: string;
+}
+
+/** One slot in a solve result, with everything the Assign screen explains. */
+export interface SolvedSlot {
+    slot_id: string;
+    section_id: string;
+    course_id: string;
+    position: Position;
+    slot_index: number;
+    applicant_id: string | null;
+    applicant_name: string | null;
+    score: number | null;
+    locked: boolean;
+    preference_rank: number | null;
+    breakdown: ScorePart[];
+    alternatives: SlotAlternative[];
+    ineligible_examples: IneligibleExample[];
+    unfilled_reason: string | null;
+    failure_counts?: { label: string; count: number }[];
+}
+
 export interface SolveResponse {
     dataset: string;
+    solver: SolverKind;
+    elapsed_ms: number;
     total_score: number;
     nodes_explored: number;
     optimal: boolean;
+    filled: number;
+    total_slots: number;
+    slots: SolvedSlot[];
     assignments: Assignment[];
     unfilled_slots: string[];
+    lock_conflicts: string[];
 }
 
 // Locks / Blocks

@@ -5,6 +5,9 @@ Python modules are never touched, so `reset_dataset` can always get back
 to a known-good state.
 """
 
+import threading
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..test_data import load_demo_data
@@ -52,12 +55,25 @@ def seed_dataset(db: Session, dataset: str) -> None:
     db.commit()
 
 
+_seed_lock = threading.Lock()
+
+
 def ensure_seeded(db: Session, dataset: str) -> None:
     """Seed this workspace from its sample loader iff it has no data yet
     (a brand-new DB, or after being wiped). Never overwrites existing rows,
     so eeits persist across server restarts."""
-    if dataset in SEED_LOADERS and dataset_is_empty(db, dataset):
-        seed_dataset(db, dataset)
+    if dataset not in SEED_LOADERS or not dataset_is_empty(db, dataset):
+        return
+    # Several requests can arrive at once on a fresh database (the frontend
+    # loads a screen's data in parallel). Seed under a lock, re-check inside
+    # it, and treat "someone else just seeded it" as success.
+    with _seed_lock:
+        if not dataset_is_empty(db, dataset):
+            return
+        try:
+            seed_dataset(db, dataset)
+        except IntegrityError:
+            db.rollback()
 
 
 def reset_dataset(db: Session, dataset: str) -> None:
