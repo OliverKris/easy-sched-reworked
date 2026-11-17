@@ -1,0 +1,34 @@
+{
+  "case": "demo",
+  "optimal": true,
+  "total_score": 27.315,
+  "filled": 3,
+  "assignments": [
+    [
+      "A001",
+      "CSCI 1012-10 (Fall 2026)",
+      "LA",
+      8.716667
+    ],
+    [
+      "A002",
+      "CSCI 1013-10 (Fall 2026)",
+      "LA",
+      7.241667
+    ],
+    [
+      "A003",
+      "CSCI 1012-10 (Fall 2026)",
+      "UTA",
+      11.356667
+    ]
+  ],
+  "unfilled": {
+    "CSCI 1012-10 (Fall 2026)::LA": 1,
+    "CSCI 1013-10 (Fall 2026)::LA": 1,
+    "CSCI 1013-10 (Fall 2026)::UTA": 1,
+    "CSCI 2113-11 (Fall 2026)::LA": 1,
+    "CSCI 2113-11 (Fall 2026)::UTA": 1,
+    "CSCI 3212-10 (Fall 2026)::UTA": 2
+  }
+}
