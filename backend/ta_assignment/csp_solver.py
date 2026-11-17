@@ -28,7 +28,7 @@ Search strategy: backtracking with
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from .applicants import Applicant
 from .applications import Application, Assignment
@@ -37,6 +37,10 @@ from .enums import PositionType
 from .locks import Lock, LockType
 from .scoring import EligibilityConfig, ScoringStrategy, DefaultScoringStrategy, check_eligibility
 
+
+
+if TYPE_CHECKING:  # imported for type hints only, avoids an import cycle
+    from .rules import CompiledProfile
 
 @dataclass(frozen=True, eq=False)
 class SlotSpec:
@@ -80,6 +84,9 @@ class SolverConfig:
     scorer: ScoringStrategy = field(default_factory=DefaultScoringStrategy)
     max_nodes: int = 300_000 # safety value on the backtracking search
     locks: List[Lock] = field(default_factory=list)
+    # A compiled department profile (ta_assignment.rules). When set, it replaces
+    # `eligibility` and `scorer`: every hard rule and scoring term comes from config.
+    profile: Optional["CompiledProfile"] = None
 
 @dataclass
 class SolverResult:
@@ -131,6 +138,14 @@ class BaseSolver:
         self.candidates: Dict[str, List[Tuple[str, float]]] = self._build_candidate_table()
 
     def _build_candidate_table(self) -> Dict[str, List[Tuple[str, float]]]:
+        if self.config.profile is not None:
+            session = self.config.profile.new_session()
+            check, score = session.check, session.score
+        else:
+            eligibility = self.config.eligibility
+            check = lambda a, app, sec, pos: check_eligibility(a, app, sec, pos, eligibility)
+            score = self.config.scorer.score
+
         table: Dict[str, List[Tuple[str, float]]] = {}
         for slot in self.slots:
             candidates = []
@@ -140,13 +155,10 @@ class BaseSolver:
                     continue
                 if (applicant.applicant_id, slot.section.section_id, slot.position) in self.blocked_pairs:
                     continue
-                result = check_eligibility(
-                    applicant, application, slot.section, slot.position,
-                    self.config.eligibility
-                )
+                result = check(applicant, application, slot.section, slot.position)
                 if result.eligible:
-                    score = self.config.scorer.score(applicant, application, slot.section, slot.position)
-                    candidates.append((applicant.applicant_id, score))
+                    candidates.append((applicant.applicant_id,
+                                       score(applicant, application, slot.section, slot.position)))
             candidates.sort(key=lambda pair: -pair[1])
             table[slot.slot_id] = candidates
         return table

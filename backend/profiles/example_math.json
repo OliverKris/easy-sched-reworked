@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "department": "Example Mathematics Department",
+  "description": "A fictional second department with different policy, to show the same code serving another program: B+ or better in the course, every TA attends lecture, a 3.4 GPA OR an A in the course, UTAs need prior experience, and scoring leans on grades and preferences instead of skill tags.",
+  "hard_rules": [
+    {
+      "id": "applied",
+      "rule": "applied_for_position"
+    },
+    {
+      "id": "b-plus-in-course",
+      "rule": "passed_course",
+      "min_grade": "B_PLUS"
+    },
+    {
+      "id": "lecture-always",
+      "rule": "no_lecture_conflict",
+      "when": "always"
+    },
+    {
+      "id": "recitation",
+      "rule": "conflict_free_lab",
+      "allow_no_labs": true
+    },
+    {
+      "id": "strong-record",
+      "rule": "any",
+      "rules": [
+        {"rule": "cmp", "field": "applicant.gpa", "op": ">=", "value": 3.4},
+        {"rule": "cmp", "field": "course.grade_points", "op": ">=", "value": 4.0}
+      ]
+    },
+    {
+      "id": "uta-experience",
+      "rule": "cmp",
+      "positions": ["UTA"],
+      "field": "applicant.prior_positions",
+      "op": ">=",
+      "value": 1
+    }
+  ],
+  "scoring": [
+    {"id": "grade", "term": "course_grade", "weight": 4.0},
+    {"id": "preference", "term": "preference_rank", "weight": 3.0},
+    {"id": "recommendations", "term": "recommendation_strength", "weight": 1.5},
+    {"id": "experience", "term": "teaching_experience", "weight": 1.0, "cap": 3,
+     "general_share": 0.5, "course_share": 0.5},
+    {
+      "id": "returning-uta",
+      "term": "bonus",
+      "weight": 1.0,
+      "positions": ["UTA"],
+      "when": {"rule": "cmp", "field": "applicant.prior_uta_terms", "op": ">=", "value": 1}
+    }
+  ]
+}

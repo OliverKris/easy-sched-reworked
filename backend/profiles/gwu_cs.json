@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "department": "GWU Computer Science",
+  "description": "GWU CS TA program: 3.0 GPA floor (3.3 for UTAs), must have passed the course, needs a free lab (and lecture when required), default scoring weights.",
+  "hard_rules": [
+    {
+      "id": "applied",
+      "rule": "applied_for_position"
+    },
+    {
+      "id": "passed-course",
+      "rule": "passed_course"
+    },
+    {
+      "id": "lecture",
+      "rule": "no_lecture_conflict",
+      "when": "if_required"
+    },
+    {
+      "id": "lab",
+      "rule": "conflict_free_lab",
+      "allow_no_labs": false
+    },
+    {
+      "id": "min-gpa",
+      "rule": "cmp",
+      "positions": [
+        "LA"
+      ],
+      "field": "applicant.gpa",
+      "op": ">=",
+      "value": 3.0,
+      "missing": "fail"
+    },
+    {
+      "id": "min-gpa-uta",
+      "rule": "cmp",
+      "positions": [
+        "UTA"
+      ],
+      "field": "applicant.gpa",
+      "op": ">=",
+      "value": 3.3,
+      "missing": "fail"
+    }
+  ],
+  "scoring": [
+    {
+      "id": "grade",
+      "term": "course_grade",
+      "weight": 3.0
+    },
+    {
+      "id": "experience",
+      "term": "teaching_experience",
+      "weight": 2.5,
+      "cap": 4,
+      "general_share": 0.6,
+      "course_share": 0.4
+    },
+    {
+      "id": "recommendations",
+      "term": "recommendation_strength",
+      "weight": 2.0
+    },
+    {
+      "id": "preference",
+      "term": "preference_rank",
+      "weight": 2.5
+    },
+    {
+      "id": "skills",
+      "term": "skill_overlap",
+      "weight": 1.0
+    },
+    {
+      "id": "uta-readiness",
+      "term": "bonus",
+      "weight": 1.5,
+      "positions": [
+        "UTA"
+      ],
+      "when": {
+        "rule": "cmp",
+        "field": "applicant.prior_la_terms",
+        "op": ">=",
+        "value": 2.0,
+        "missing": "fail"
+      }
+    }
+  ]
+}

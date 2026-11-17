@@ -6,6 +6,7 @@ Run from the backend/ directory:
     python -m benchmarks.run --sizes small xlarge --seeds 1 2 3 4 5
     python -m benchmarks.run --max-nodes 1000000 --csv results.csv
     python -m benchmarks.run --solver matching           # exact bipartite-matching solver
+    python -m benchmarks.run --profile profiles/gwu_cs.json   # config-driven rules
 
 For each instance it reports:
     build_ms   time to build the candidate table (eligibility + scoring)
@@ -32,6 +33,7 @@ from typing import List, Optional
 
 from ta_assignment.csp_solver import CSPSolver, SolverConfig
 from ta_assignment.matching_solver import MatchingSolver
+from ta_assignment.rules import load_profile
 from ta_assignment.scoring import DefaultScoringStrategy, EligibilityConfig
 
 from . import reference
@@ -40,12 +42,14 @@ from .generator import SIZES, generate_sized
 SOLVERS = {"csp": CSPSolver, "matching": MatchingSolver}
 
 
-def default_config(max_nodes: int = 300_000) -> SolverConfig:
-    """Matches the policy used in demo.py: 3.0 GPA floor, 3.3 for UTAs."""
+def default_config(max_nodes: int = 300_000, profile=None) -> SolverConfig:
+    """Matches the policy used in demo.py: 3.0 GPA floor, 3.3 for UTAs.
+    Pass a compiled profile to use config-driven rules instead."""
     return SolverConfig(
         eligibility=EligibilityConfig(min_gpa=3.0, min_gpa_uta=3.3),
         scorer=DefaultScoringStrategy(),
         max_nodes=max_nodes,
+        profile=profile,
     )
 
 
@@ -74,11 +78,12 @@ class RunResult:
         return 100 * diff / self.ref_score
 
 
-def run_one(size: str, seed: int, max_nodes: int, solver_name: str = "csp") -> RunResult:
+def run_one(size: str, seed: int, max_nodes: int, solver_name: str = "csp",
+            profile=None) -> RunResult:
     inst = generate_sized(size, seed)
 
     t0 = time.perf_counter()
-    solver = SOLVERS[solver_name](inst.applicants, inst.applications, inst.sections, config=default_config(max_nodes))
+    solver = SOLVERS[solver_name](inst.applicants, inst.applications, inst.sections, config=default_config(max_nodes, profile))
     t1 = time.perf_counter()
     result = solver.solve()
     t2 = time.perf_counter()
@@ -130,11 +135,13 @@ def main(argv=None) -> int:
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument("--max-nodes", type=int, default=300_000)
     parser.add_argument("--solver", choices=list(SOLVERS), default="csp")
+    parser.add_argument("--profile", help="path to a department profile JSON (default: built-in GWU rules)")
     parser.add_argument("--csv", help="optional path to write raw results as CSV")
     args = parser.parse_args(argv)
 
-    print(f"solver: {args.solver}\n")
-    results = [run_one(size, seed, args.max_nodes, args.solver) for size in args.sizes for seed in args.seeds]
+    profile = load_profile(args.profile) if args.profile else None
+    print(f"solver: {args.solver} | rules: {args.profile or 'built-in (legacy)'}\n")
+    results = [run_one(size, seed, args.max_nodes, args.solver, profile) for size in args.sizes for seed in args.seeds]
     print_table(results)
 
     if args.csv:
