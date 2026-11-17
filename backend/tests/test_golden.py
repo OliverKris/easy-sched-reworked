@@ -38,6 +38,19 @@ def test_optimal_score_unchanged(name, results):
 
 
 @pytest.mark.parametrize("name", list(CASES))
+def test_matching_solver_reaches_golden_score(name):
+    """The exact solver must hit every golden optimum, whatever its tie-breaking."""
+    from ta_assignment.matching_solver import MatchingSolver
+    from benchmarks.run import default_config
+
+    expected = _load(name)
+    applicants, applications, sections = CASES[name]()
+    result = MatchingSolver(applicants, applications, sections, config=default_config()).solve()
+    assert result.optimal
+    assert result.total_score == pytest.approx(expected["total_score"], abs=1e-6)
+
+
+@pytest.mark.parametrize("name", list(CASES))
 def test_assignments_unchanged(name, results):
     expected = _load(name)
     actual = results[name]

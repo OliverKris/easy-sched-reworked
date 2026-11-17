@@ -107,7 +107,9 @@ class SolverResult:
         return "\n".join(lines)
     
 
-class CSPSolver:
+class BaseSolver:
+    """Shared setup for every solver: slots, blocked pairs, candidate table,
+    lock resolution, and packaging the final answer."""
     def __init__(self,
                  applicants: Dict[str, Applicant],
                  applications: List[Application],
@@ -127,12 +129,6 @@ class CSPSolver:
         }
         # slot_id -> list[(applicant_id, score)], sorted best-score-first
         self.candidates: Dict[str, List[Tuple[str, float]]] = self._build_candidate_table()
-
-        # search state, populated by solve()
-        self._best_assignment: Dict[SlotSpec, Tuple[str, float]] = {}
-        self._best_score: float = -1.0
-        self._nodes_explored: int = 0
-        self._hit_node_limit: bool = False
 
     def _build_candidate_table(self) -> Dict[str, List[Tuple[str, float]]]:
         table: Dict[str, List[Tuple[str, float]]] = {}
@@ -199,6 +195,43 @@ class CSPSolver:
         
         return resolved, conflicts
 
+    def _build_result(self, chosen, chosen_score, locked_assignments,
+                      lock_conflicts, nodes_explored, optimal) -> SolverResult:
+        """Merges the solver's choices with locked assignments into a SolverResult.
+        `chosen` maps SlotSpec -> (applicant_id, score) for the non-locked slots."""
+        final_assignment = {**chosen, **locked_assignments}
+        locked_total = sum(score for _, score in locked_assignments.values())
+
+        assignments = [
+            Assignment(applicant_id=aid, section_id=slot.section.section_id,
+                       position=slot.position, score=score)
+            for slot, (aid, score) in final_assignment.items()
+        ]
+        unfilled = [s for s in self.slots if s not in final_assignment]
+
+        return SolverResult(
+            assignments=assignments,
+            unfilled_slots=unfilled,
+            total_score=chosen_score + locked_total,
+            nodes_explored=nodes_explored,
+            optimal=optimal,
+            lock_conflicts=lock_conflicts,
+        )
+
+    def solve(self) -> SolverResult:
+        raise NotImplementedError
+
+
+class CSPSolver(BaseSolver):
+    """Backtracking search with MRV ordering and branch-and-bound."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # search state, populated by solve()
+        self._best_assignment: Dict[SlotSpec, Tuple[str, float]] = {}
+        self._best_score: float = -1.0
+        self._nodes_explored: int = 0
+        self._hit_node_limit: bool = False
+
     def solve(self) -> SolverResult:
         locked_assignments, lock_conflicts = self._resolve_locks()
 
@@ -224,23 +257,10 @@ class CSPSolver:
         current: Dict[SlotSpec, Tuple[str, float]] = {}
         self._backtrack(order, 0, used_applicants, current, 0.0, suffix_upper)
 
-        final_assignment = {**self._best_assignment, **locked_assignments}
-        locked_total = sum(score for _, score in locked_assignments.values())
-
-        assignments = [
-            Assignment(applicant_id=aid, section_id=slot.section.section_id,
-                       position=slot.position, score=score)
-            for slot, (aid, score) in final_assignment.items()
-        ]
-        unfilled = [s for s in self.slots if s not in final_assignment]
-
-        return SolverResult(
-            assignments=assignments,
-            unfilled_slots=unfilled,
-            total_score=max(self._best_score, 0.0) + locked_total,
-            nodes_explored=self._nodes_explored,
-            optimal=not self._hit_node_limit,
-            lock_conflicts=lock_conflicts,
+        return self._build_result(
+            self._best_assignment, max(self._best_score, 0.0),
+            locked_assignments, lock_conflicts,
+            self._nodes_explored, not self._hit_node_limit,
         )
 
     def _backtrack(self, order, idx, used, current, current_score, suffix_upper):

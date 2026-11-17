@@ -8,6 +8,7 @@ Run with:
 import pytest
 
 from ta_assignment.csp_solver import CSPSolver, SolverConfig
+from ta_assignment.matching_solver import MatchingSolver
 from ta_assignment.enums import PositionType
 from ta_assignment.locks import Lock, LockType
 from ta_assignment.test_data_extended import load_extended_data
@@ -24,16 +25,22 @@ def data():
     }
 
 
+@pytest.fixture(params=[CSPSolver, MatchingSolver], ids=["csp", "matching"])
+def Solver(request):
+    """Runs every lock/block test against both solvers: locks must behave identically."""
+    return request.param
+
+
 SECTION_1010 = "CSCI 1010-10 (Fall 2026)"   # 1 LA slot, several eligible applicants
 SECTION_3212 = "CSCI 3212-10 (Fall 2026)"   # 2 UTA slots
 
 class TestLocking:
-    def test_locked_applicant_is_placed_even_if_not_top_scorer(self, data):
+    def test_locked_applicant_is_placed_even_if_not_top_scorer(self, data, Solver):
         # A014 is eligible for CSCI 1010 LA but scores low (no recs, no
         # skill overlap, unranked). Without a lock the solver would never
         # pick them over A001/A009/A010/A012.
         lock = Lock("A014", SECTION_1010, PositionType.LA, LockType.LOCKED)
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=[lock]),
         )
@@ -42,23 +49,23 @@ class TestLocking:
         assert winners == {"A014"}
         assert result.lock_conflicts == []
 
-    def test_locked_applicant_excluded_from_search_pool_elsewhere(self, data):
+    def test_locked_applicant_excluded_from_search_pool_elsewhere(self, data, Solver):
         # Locking A001 into 1010 should remove them from consideration for
         # every other free slot (they can only hold one position).
         lock = Lock("A001", SECTION_1010, PositionType.LA, LockType.LOCKED)
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=[lock]),
         )
         result = solver.solve()
         assert sum(1 for a in result.assignments if a.applicant_id == "A001") == 1
 
-    def test_two_locks_fill_both_uta_slots_on_a_two_slot_section(self, data):
+    def test_two_locks_fill_both_uta_slots_on_a_two_slot_section(self, data, Solver):
         locks = [
             Lock("A005", SECTION_3212, PositionType.UTA, LockType.LOCKED),
             Lock("A011", SECTION_3212, PositionType.UTA, LockType.LOCKED),
         ]
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=locks),
         )
@@ -67,13 +74,13 @@ class TestLocking:
         assert winners == {"A005", "A011"}
         assert result.lock_conflicts == []
 
-    def test_third_lock_on_a_two_slot_section_is_a_conflict(self, data):
+    def test_third_lock_on_a_two_slot_section_is_a_conflict(self, data, Solver):
         locks = [
             Lock("A005", SECTION_3212, PositionType.UTA, LockType.LOCKED),
             Lock("A011", SECTION_3212, PositionType.UTA, LockType.LOCKED),
             Lock("A001", SECTION_3212, PositionType.UTA, LockType.LOCKED),  # no slot left
         ]
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=locks),
         )
@@ -81,12 +88,12 @@ class TestLocking:
         assert any("no open slot remaining" in c for c in result.lock_conflicts)
         assert not any(a.applicant_id == "A001" and a.section_id == SECTION_3212 for a in result.assignments)
 
-    def test_double_locked_applicant_keeps_first_lock_flags_second(self, data):
+    def test_double_locked_applicant_keeps_first_lock_flags_second(self, data, Solver):
         locks = [
             Lock("A001", SECTION_1010, PositionType.LA, LockType.LOCKED),
             Lock("A001", SECTION_3212, PositionType.UTA, LockType.LOCKED),
         ]
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=locks),
         )
@@ -96,9 +103,9 @@ class TestLocking:
         assert a001_assignments[0].section_id == SECTION_1010
         assert any("already locked into another slot" in c for c in result.lock_conflicts)
 
-    def test_unknown_applicant_lock_is_a_conflict_not_a_crash(self, data):
+    def test_unknown_applicant_lock_is_a_conflict_not_a_crash(self, data, Solver):
         lock = Lock("NOPE", SECTION_1010, PositionType.LA, LockType.LOCKED)
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=[lock]),
         )
@@ -107,32 +114,32 @@ class TestLocking:
 
 
 class TestBlocking:
-    def test_blocked_applicant_never_assigned_to_that_section_position(self, data):
+    def test_blocked_applicant_never_assigned_to_that_section_position(self, data, Solver):
         block = Lock("A001", SECTION_1010, PositionType.LA, LockType.BLOCKED)
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=[block]),
         )
         result = solver.solve()
         assert not any(a.applicant_id == "A001" and a.section_id == SECTION_1010 for a in result.assignments)
 
-    def test_blocked_applicant_still_eligible_elsewhere(self, data):
+    def test_blocked_applicant_still_eligible_elsewhere(self, data, Solver):
         # Blocking A001 from 1010/LA shouldn't touch their eligibility for
         # other sections they qualify for.
         block = Lock("A001", SECTION_1010, PositionType.LA, LockType.BLOCKED)
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=[block]),
         )
         result = solver.solve()
         assert any(a.applicant_id == "A001" for a in result.assignments)  # placed somewhere else
 
-    def test_lock_contradicting_a_block_is_a_conflict(self, data):
+    def test_lock_contradicting_a_block_is_a_conflict(self, data, Solver):
         locks = [
             Lock("A001", SECTION_1010, PositionType.LA, LockType.BLOCKED),
             Lock("A001", SECTION_1010, PositionType.LA, LockType.LOCKED),
         ]
-        solver = CSPSolver(
+        solver = Solver(
             data["applicants"], data["applications"], data["sections"],
             config=SolverConfig(locks=locks),
         )
@@ -142,8 +149,8 @@ class TestBlocking:
 
 
 class TestNoLocks:
-    def test_empty_locks_behaves_exactly_like_before(self, data):
-        solver = CSPSolver(data["applicants"], data["applications"], data["sections"])
+    def test_empty_locks_behaves_exactly_like_before(self, data, Solver):
+        solver = Solver(data["applicants"], data["applications"], data["sections"])
         result = solver.solve()
         assert result.lock_conflicts == []
         assert result.total_score > 0

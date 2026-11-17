@@ -5,6 +5,7 @@ Run from the backend/ directory:
     python -m benchmarks.run                         # small, medium, large x seeds 1-3
     python -m benchmarks.run --sizes small xlarge --seeds 1 2 3 4 5
     python -m benchmarks.run --max-nodes 1000000 --csv results.csv
+    python -m benchmarks.run --solver matching           # exact bipartite-matching solver
 
 For each instance it reports:
     build_ms   time to build the candidate table (eligibility + scoring)
@@ -30,10 +31,13 @@ from dataclasses import asdict, dataclass
 from typing import List, Optional
 
 from ta_assignment.csp_solver import CSPSolver, SolverConfig
+from ta_assignment.matching_solver import MatchingSolver
 from ta_assignment.scoring import DefaultScoringStrategy, EligibilityConfig
 
 from . import reference
 from .generator import SIZES, generate_sized
+
+SOLVERS = {"csp": CSPSolver, "matching": MatchingSolver}
 
 
 def default_config(max_nodes: int = 300_000) -> SolverConfig:
@@ -64,14 +68,17 @@ class RunResult:
     def gap_pct(self) -> Optional[float]:
         if self.ref_score is None or self.ref_score == 0:
             return None
-        return 100 * (self.ref_score - self.score) / self.ref_score
+        diff = self.ref_score - self.score
+        if abs(diff) < 1e-9:          # float noise, not a real gap
+            return 0.0
+        return 100 * diff / self.ref_score
 
 
-def run_one(size: str, seed: int, max_nodes: int) -> RunResult:
+def run_one(size: str, seed: int, max_nodes: int, solver_name: str = "csp") -> RunResult:
     inst = generate_sized(size, seed)
 
     t0 = time.perf_counter()
-    solver = CSPSolver(inst.applicants, inst.applications, inst.sections, config=default_config(max_nodes))
+    solver = SOLVERS[solver_name](inst.applicants, inst.applications, inst.sections, config=default_config(max_nodes))
     t1 = time.perf_counter()
     result = solver.solve()
     t2 = time.perf_counter()
@@ -122,10 +129,12 @@ def main(argv=None) -> int:
     parser.add_argument("--sizes", nargs="+", default=["small", "medium", "large"], choices=list(SIZES))
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument("--max-nodes", type=int, default=300_000)
+    parser.add_argument("--solver", choices=list(SOLVERS), default="csp")
     parser.add_argument("--csv", help="optional path to write raw results as CSV")
     args = parser.parse_args(argv)
 
-    results = [run_one(size, seed, args.max_nodes) for size in args.sizes for seed in args.seeds]
+    print(f"solver: {args.solver}\n")
+    results = [run_one(size, seed, args.max_nodes, args.solver) for size in args.sizes for seed in args.seeds]
     print_table(results)
 
     if args.csv:
