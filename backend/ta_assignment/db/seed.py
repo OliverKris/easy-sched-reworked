@@ -28,10 +28,13 @@ SEED_LOADERS = {
 }
 
 
-def seed_dataset(db: Session, dataset: str) -> None:
-    loader = SEED_LOADERS.get(dataset)
+def seed_dataset(db: Session, dataset: str, source: str | None = None) -> None:
+    """Fills `dataset` from a sample loader. `source` picks the loader when the
+    workspace key isn't itself a loader name (a browser's sample workspace)."""
+    key = source or dataset
+    loader = SEED_LOADERS.get(key)
     if loader is None:
-        raise ValueError(f"No seed loader registered for dataset `{dataset}`")
+        raise ValueError(f"No seed loader registered for `{key}`")
     
     courses, sections, applicants, applications = loader()
     apps_by_applicant = {a.applicant_id: a for a in applications}

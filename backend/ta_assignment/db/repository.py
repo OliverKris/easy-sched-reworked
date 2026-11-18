@@ -154,7 +154,7 @@ def dataset_is_empty(db: Session, dataset: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def wipe_dataset(db: Session, dataset: str) -> None:
-    for model in (CourseModel, SectionModel, ApplicantModel, ApplicationModel):
+    for model in (CourseModel, SectionModel, ApplicantModel, ApplicationModel, LockModel):
         db.execute(delete(model).where(model.dataset == dataset))
     db.commit()
 

@@ -121,3 +121,24 @@ class LockModel(Base):
     section_id: Mapped[int] = mapped_column(String, index=True)
     position: Mapped[str] = mapped_column(String)   # "LA" | "UTA"
     lock_type: Mapped[str] = mapped_column(String)  # "locked" | "blocked"
+
+
+class WorkspaceModel(Base):
+    """One coordinator's project (usually one term), owned by a browser.
+
+    Its `id` is the `dataset` key every other table is scoped by. `owner` is
+    the anonymous client id the browser generates and sends as X-Client-Id,
+    so each browser only ever sees its own workspaces. There are no accounts:
+    a workspace moves between browsers by exporting and importing it.
+    """
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner: Mapped[str] = mapped_column(String, index=True)
+    name: Mapped[str] = mapped_column(String)
+    sample: Mapped[str | None] = mapped_column(String, nullable=True)   # seed loader key, for sample workspaces
+    created_at: Mapped[str] = mapped_column(String)                    # ISO-8601 UTC
+    # Rule settings the solver uses (GPA floors, weights; later a full profile).
+    settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # A schedule the coordinator marked final: {"finalized_at", "assignments": [...]}.
+    schedule: Mapped[dict | None] = mapped_column(JSON, nullable=True)

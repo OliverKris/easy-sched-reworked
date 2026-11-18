@@ -18,18 +18,20 @@ Docs at http://127.0.0.1:8000/docs (FastAPI's auto-generated Swagger UI).
 from contextlib import asynccontextmanager
 from typing import Literal, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Header, Response, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ValidationError, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ta_assignment.db import repository as repo
 from ta_assignment.db.seed import SEED_LOADERS, ensure_seeded, reset_dataset
+from ta_assignment.db import workspaces as ws_repo
+from ta_assignment.db import bundle as bundle_io
+from ta_assignment.db.bundle import SettingsJ
 from ta_assignment.db.session import get_db, init_db
 from ta_assignment.enums import PositionType
 from ta_assignment.locks import LockType
-from ta_assignment.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
 from ta_assignment.scoring import EligibilityConfig, DefaultScoringStrategy, check_eligibility
 from ta_assignment.csp_solver import CSPSolver, SolverConfig
 from ta_assignment.matching_solver import MatchingSolver
@@ -37,6 +39,9 @@ from ta_assignment.rules import compile_profile
 from ta_assignment.rules.legacy import profile_from_legacy
 from solve_view import build_solve_view
 import time
+import csv
+import io
+import re
 
 
 @asynccontextmanager
@@ -57,10 +62,30 @@ app.add_middleware(
 )
 
 
-def dataset_dep(db: Session = Depends(get_db), dataset: str = Query("demo")):
-    """Ensures the requested workspace exists (seeding it if this is the
-    first time it's been touched) and hands back (db, dataset)."""
-    ensure_seeded(db, dataset)
+def client_id(x_client_id: Optional[str] = Header(None, alias="X-Client-Id")) -> Optional[str]:
+    """The anonymous id the browser generates and sends on every request."""
+    return x_client_id
+
+
+def open_workspace(db: Session, dataset: str, client: Optional[str]) -> None:
+    """Gate for every endpoint that reads or writes workspace data.
+
+    The built-in sample datasets ("demo", "extended") stay shared and are
+    seeded on first touch. Anything else must be a workspace owned by the
+    calling browser; otherwise it's reported as not found, so one browser
+    can't even learn that another's workspace exists.
+    """
+    if dataset in SEED_LOADERS:
+        ensure_seeded(db, dataset)
+        return
+    if not client or ws_repo.get_owned(db, dataset, client) is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+
+def dataset_dep(db: Session = Depends(get_db), dataset: str = Query("demo"),
+                client: Optional[str] = Depends(client_id)):
+    """Checks access to the requested workspace and hands back (db, dataset)."""
+    open_workspace(db, dataset, client)
     return db, dataset
 
 
@@ -211,8 +236,8 @@ class SolveRequest(BaseModel):
 
 
 @app.post("/api/solve")
-def api_solve(req: SolveRequest, db: Session = Depends(get_db)):
-    ensure_seeded(db, req.dataset)
+def api_solve(req: SolveRequest, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, req.dataset, client)
     sections = repo.get_sections(db, req.dataset)
     applicants = repo.get_applicants(db, req.dataset)
     applications = repo.get_applications(db, req.dataset)
@@ -387,8 +412,8 @@ def _dump_labs(labs: List[LabIn]) -> List[dict]:
 # -----------
 
 @app.post("/api/courses", status_code=201)
-def create_course(payload: CourseCreate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
-    ensure_seeded(db, dataset)
+def create_course(payload: CourseCreate, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     try:
         row = repo.create_course(db, dataset, payload.course_id, payload.title, payload.description, payload.skills)
     except IntegrityError:
@@ -398,7 +423,8 @@ def create_course(payload: CourseCreate, dataset: str = Query("demo"), db: Sessi
 
 
 @app.put("/api/courses/{course_id}")
-def update_course(course_id: str, payload: CourseUpdate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+def update_course(course_id: str, payload: CourseUpdate, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     row = repo.update_course(db, dataset, course_id, **payload.model_dump())
     if row is None:
         raise HTTPException(status_code=404, detail=f"Course '{course_id}' not found in '{dataset}'")
@@ -406,7 +432,8 @@ def update_course(course_id: str, payload: CourseUpdate, dataset: str = Query("d
 
 
 @app.delete("/api/courses/{course_id}", status_code=204)
-def delete_course(course_id: str, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+def delete_course(course_id: str, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     if not repo.delete_course(db, dataset, course_id):
         raise HTTPException(status_code=404, detail=f"Course '{course_id}' not found in '{dataset}'")
 
@@ -416,8 +443,8 @@ def delete_course(course_id: str, dataset: str = Query("demo"), db: Session = De
 # ------------
 
 @app.post("/api/sections", status_code=201)
-def create_section(payload: SectionCreate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
-    ensure_seeded(db, dataset)
+def create_section(payload: SectionCreate, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     if payload.course_id not in repo.get_courses(db, dataset):
         raise HTTPException(status_code=400, detail=f"Course '{payload.course_id}' does not exist in '{dataset}'")
     fields = payload.model_dump(exclude={"lecture_meetings", "labs"})
@@ -432,7 +459,8 @@ def create_section(payload: SectionCreate, dataset: str = Query("demo"), db: Ses
 
 
 @app.put("/api/sections/{section_id}")
-def update_section(section_id: int, payload: SectionUpdate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+def update_section(section_id: int, payload: SectionUpdate, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     fields = payload.model_dump(exclude={"lecture_meetings", "labs"})
     if payload.lecture_meetings is not None:
         fields["lecture_meetings"] = _dump_timeslots(payload.lecture_meetings)
@@ -445,7 +473,8 @@ def update_section(section_id: int, payload: SectionUpdate, dataset: str = Query
 
 
 @app.delete("/api/sections/{section_id}", status_code=204)
-def delete_section(section_id: int, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+def delete_section(section_id: int, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     if not repo.delete_section(db, dataset, section_id):
         raise HTTPException(status_code=404, detail=f"Section {section_id} not found in '{dataset}'")
 
@@ -456,8 +485,8 @@ def delete_section(section_id: int, dataset: str = Query("demo"), db: Session = 
 
 
 @app.post("/api/applicants", status_code=201)
-def create_applicant(payload: ApplicantCreate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
-    ensure_seeded(db, dataset)
+def create_applicant(payload: ApplicantCreate, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     applicant_fields = {
         "applicant_id": payload.applicant_id,
         "name": payload.name,
@@ -478,7 +507,8 @@ def create_applicant(payload: ApplicantCreate, dataset: str = Query("demo"), db:
 
 
 @app.put("/api/applicants/{applicant_id}")
-def update_applicant(applicant_id: str, payload: ApplicantUpdate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+def update_applicant(applicant_id: str, payload: ApplicantUpdate, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     applicant_fields = payload.model_dump(exclude={"past_courses", "teaching_experience", "recommendations", "upcoming_schedule", "application"})
     if payload.past_courses is not None:
         applicant_fields["past_courses"] = [p.model_dump() for p in payload.past_courses]
@@ -498,7 +528,8 @@ def update_applicant(applicant_id: str, payload: ApplicantUpdate, dataset: str =
 
 
 @app.delete("/api/applicants/{applicant_id}", status_code=204)
-def delete_applicant(applicant_id: str, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+def delete_applicant(applicant_id: str, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     if not repo.delete_applicant(db, dataset, applicant_id):
         raise HTTPException(status_code=404, detail=f"Applicant '{applicant_id}' not found in '{dataset}'")
 
@@ -531,14 +562,14 @@ def _serialize_lock(row) -> dict:
 
 
 @app.get("/api/locks")
-def list_locks(dataset: str = Query("demo"), db: Session = Depends(get_db)):
-    ensure_seeded(db, dataset)
+def list_locks(dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     return {"locks": [_serialize_lock(r) for r in repo.list_lock_rows(db, dataset)]}
 
 
 @app.post("/api/locks", status_code=201)
-def create_lock(payload: LockCreate, dataset: str = Query("demo"), db: Session = Depends(get_db)):
-    ensure_seeded(db, dataset)
+def create_lock(payload: LockCreate, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
 
     if payload.position not in {p.name for p in PositionType}:
         raise HTTPException(status_code=400, detail="position must be 'LA' or 'UTA'" )
@@ -564,7 +595,8 @@ def create_lock(payload: LockCreate, dataset: str = Query("demo"), db: Session =
 
 
 @app.delete("/api/locks/{lock_id}", status_code=204)
-def delete_lock(lock_id: int, dataset: str = Query("demo"), db: Session = Depends(get_db)):
+def delete_lock(lock_id: int, dataset: str = Query("demo"), db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    open_workspace(db, dataset, client)
     if not repo.delete_lock(db, dataset, lock_id):
         raise HTTPException(status_code=404, detail=f"Lock {lock_id} not found in '{dataset}'")
 
@@ -586,8 +618,9 @@ def api_recommendations(
     min_gpa_uta: Optional[float] = Query(None),
     dataset: str = Query("demo"),
     db: Session = Depends(get_db),
+    client: Optional[str] = Depends(client_id),
 ):
-    ensure_seeded(db, dataset)
+    open_workspace(db, dataset, client)
     if position not in {p.name for p in PositionType}:
         raise HTTPException(status_code=400, detail="position must be 'LA' or 'UTA'")
     
@@ -639,3 +672,209 @@ def api_recommendations(
         "position": position,
         "recommendations": candidates[:limit],
     }
+
+# ---------------------------------------------------------------------------
+# Workspaces: per-browser projects, their saved settings, finalized schedules,
+# and workspace files (export / import).
+# ---------------------------------------------------------------------------
+
+MAX_WORKSPACES_PER_BROWSER = 25
+
+
+def _require_client(client: Optional[str]) -> str:
+    if not client:
+        raise HTTPException(status_code=400, detail="Missing X-Client-Id header")
+    return client
+
+
+def _owned(db: Session, workspace_id: str, client: Optional[str]):
+    ws = ws_repo.get_owned(db, workspace_id, _require_client(client))
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return ws
+
+
+def _validation_message(err: ValidationError) -> str:
+    parts = []
+    for e in err.errors()[:8]:
+        where = ".".join(str(x) for x in e["loc"])
+        parts.append(f"{where}: {e['msg'].removeprefix('Value error, ')}")
+    more = len(err.errors()) - 8
+    return "; ".join(parts) + (f"; and {more} more" if more > 0 else "")
+
+
+class WorkspaceCreate(BaseModel):
+    name: str = "Untitled term"
+    sample: Optional[str] = None   # "extended" or "demo" to start from sample data
+
+
+class WorkspaceUpdate(BaseModel):
+    name: str
+
+
+class BundleImport(BaseModel):
+    bundle: dict
+    parts: Optional[List[str]] = None   # default: every part the file contains
+    name: Optional[str] = None          # for importing as a new workspace
+
+
+@app.get("/api/workspaces")
+def list_workspaces(db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    return {"workspaces": [ws_repo.summarize(db, ws) for ws in ws_repo.list_workspaces(db, _require_client(client))]}
+
+
+@app.post("/api/workspaces", status_code=201)
+def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    owner = _require_client(client)
+    if len(ws_repo.list_workspaces(db, owner)) >= MAX_WORKSPACES_PER_BROWSER:
+        raise HTTPException(status_code=400, detail=f"A browser can hold up to {MAX_WORKSPACES_PER_BROWSER} workspaces")
+    try:
+        ws = ws_repo.create_workspace(db, owner, payload.name, payload.sample)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ws_repo.summarize(db, ws)
+
+
+@app.get("/api/workspaces/{workspace_id}")
+def get_workspace(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    return ws_repo.summarize(db, _owned(db, workspace_id, client))
+
+
+@app.patch("/api/workspaces/{workspace_id}")
+def rename_workspace(workspace_id: str, payload: WorkspaceUpdate, db: Session = Depends(get_db),
+                     client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    ws.name = payload.name.strip() or ws.name
+    db.commit()
+    return ws_repo.summarize(db, ws)
+
+
+@app.delete("/api/workspaces/{workspace_id}", status_code=204)
+def delete_workspace(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    ws_repo.delete_workspace(db, _owned(db, workspace_id, client))
+
+
+@app.post("/api/workspaces/{workspace_id}/reset")
+def reset_workspace(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    try:
+        ws_repo.reset_sample(db, ws)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return ws_repo.summarize(db, ws)
+
+
+@app.put("/api/workspaces/{workspace_id}/settings")
+def save_settings(workspace_id: str, payload: SettingsJ, db: Session = Depends(get_db),
+                  client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    ws.settings = payload.model_dump()
+    db.commit()
+    return ws_repo.summarize(db, ws)
+
+
+def _solve_with_settings(db: Session, dataset: str, settings: dict):
+    """Runs the exact solver with a workspace's saved settings and locks."""
+    eli = EligibilityConfig(min_gpa=settings.get("min_gpa"), min_gpa_uta=settings.get("min_gpa_uta"))
+    scorer = DefaultScoringStrategy(**settings.get("weights", {}))
+    profile = compile_profile(profile_from_legacy(eli, scorer))
+    applicants = repo.get_applicants(db, dataset)
+    solver = MatchingSolver(
+        applicants, repo.get_applications(db, dataset), repo.get_sections(db, dataset),
+        config=SolverConfig(profile=profile, locks=repo.get_locks(db, dataset)),
+    )
+    return solver.solve(), applicants
+
+
+@app.post("/api/workspaces/{workspace_id}/schedule")
+def finalize_schedule(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    """Marks the current best assignment (saved settings + locks) as final."""
+    ws = _owned(db, workspace_id, client)
+    result, applicants = _solve_with_settings(db, ws.id, ws.settings or ws_repo.DEFAULT_SETTINGS)
+    if not result.assignments:
+        raise HTTPException(status_code=400, detail="Nothing to finalize: no one could be assigned yet")
+    ws.schedule = {
+        "finalized_at": ws_repo._now(),
+        "total_score": round(result.total_score, 2),
+        "assignments": [
+            {"applicant_id": a.applicant_id, "applicant_name": applicants[a.applicant_id].name,
+             "section_id": a.section_id, "position": a.position.name, "score": round(a.score, 2)}
+            for a in sorted(result.assignments, key=lambda a: (a.section_id, a.position.name, a.applicant_id))
+        ],
+        "unfilled": [s.slot_id for s in result.unfilled_slots],
+    }
+    db.commit()
+    return ws_repo.summarize(db, ws)
+
+
+@app.delete("/api/workspaces/{workspace_id}/schedule", status_code=204)
+def unfinalize_schedule(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    ws.schedule = None
+    db.commit()
+
+
+@app.get("/api/workspaces/{workspace_id}/schedule.csv")
+def schedule_csv(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    if not ws.schedule:
+        raise HTTPException(status_code=404, detail="No finalized schedule yet")
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["section", "position", "applicant_id", "name", "score"])
+    for a in ws.schedule["assignments"]:
+        writer.writerow([a["section_id"], a["position"], a["applicant_id"], a["applicant_name"], a["score"]])
+    for slot_id in ws.schedule.get("unfilled", []):
+        writer.writerow([slot_id, "", "", "UNFILLED", ""])
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", ws.name).strip("-") or "schedule"
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}-schedule.csv"'},
+    )
+
+
+@app.get("/api/workspaces/{workspace_id}/export")
+def export_workspace(workspace_id: str, parts: Optional[str] = Query(None, description="comma-separated parts"),
+                     db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    chosen = [p.strip() for p in parts.split(",")] if parts else None
+    if chosen and any(p not in bundle_io.PARTS for p in chosen):
+        raise HTTPException(status_code=400, detail=f"parts must be from {', '.join(bundle_io.PARTS)}")
+    return bundle_io.export_workspace(db, ws, chosen)
+
+
+def _parse_upload(payload: BundleImport):
+    try:
+        bundle = bundle_io.parse_bundle(payload.bundle)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=f"This file isn't a valid workspace file. {_validation_message(e)}")
+    if payload.parts and any(p not in bundle_io.PARTS for p in payload.parts):
+        raise HTTPException(status_code=400, detail=f"parts must be from {', '.join(bundle_io.PARTS)}")
+    return bundle
+
+
+@app.post("/api/workspaces/import", status_code=201)
+def import_as_new(payload: BundleImport, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    owner = _require_client(client)
+    bundle = _parse_upload(payload)
+    if len(ws_repo.list_workspaces(db, owner)) >= MAX_WORKSPACES_PER_BROWSER:
+        raise HTTPException(status_code=400, detail=f"A browser can hold up to {MAX_WORKSPACES_PER_BROWSER} workspaces")
+    ws = ws_repo.create_workspace(db, owner, payload.name or bundle.name)
+    try:
+        report = bundle_io.import_into(db, ws, bundle, payload.parts)
+    except bundle_io.BundleError as e:
+        ws_repo.delete_workspace(db, ws)
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"workspace": ws_repo.summarize(db, ws), "report": report}
+
+
+@app.post("/api/workspaces/{workspace_id}/import")
+def import_into_workspace(workspace_id: str, payload: BundleImport, db: Session = Depends(get_db),
+                          client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    bundle = _parse_upload(payload)
+    try:
+        report = bundle_io.import_into(db, ws, bundle, payload.parts)
+    except bundle_io.BundleError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"workspace": ws_repo.summarize(db, ws), "report": report}
