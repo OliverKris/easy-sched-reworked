@@ -266,3 +266,77 @@ export interface SectionCreate {
 }
 
 export type SectionUpdate = Partial<Omit<SectionCreate, "course_id">>;
+
+// --- Editable records (same shapes as workspace files) ------------------------
+
+export type Day = "MON" | "TUE" | "WED" | "THU" | "FRI";
+export type Term = "FALL" | "SPRING";
+export type GradeName =
+    | "A" | "A_MINUS" | "B_PLUS" | "B" | "B_MINUS" | "C_PLUS" | "C" | "C_MINUS"
+    | "D_PLUS" | "D" | "D_MINUS" | "F" | "IN_PROGRESS";
+
+export interface TimeSlotJ { day: Day; start: string; end: string; label?: string }
+export interface LabJ { lab_id: string; capacity?: number | null; meetings: TimeSlotJ[] }
+
+export interface CourseJ { course_id: string; title: string; description?: string; skills: string[] }
+
+export interface SectionJ {
+    course_id: string;
+    section_number: string;
+    term: Term;
+    year: number;
+    instructor: string;
+    lecture_meetings: TimeSlotJ[];
+    labs: LabJ[];
+    la_count: number;
+    uta_count: number;
+    la_hours_per_week?: number;
+    uta_hours_per_week?: number;
+    la_must_attend_lecture: boolean;
+    uta_must_attend_lecture: boolean;
+}
+
+export interface SectionRecord extends SectionJ { id: number; section_id: string }
+export interface CourseRecord extends CourseJ { sections: SectionRecord[] }
+
+export interface PastCourseJ { course_id: string; grade: GradeName; term: Term; year: number }
+export interface TeachingJ { course_id: string; position: Position; term: Term; year: number; supervisor_rating?: number | null }
+export interface RecommendationJ { faculty_name: string; course_id?: string | null; strength: number; note?: string }
+
+export interface ApplicationJ {
+    term: Term;
+    year: number;
+    position_types: Position[];
+    ranked_preferences: { course_id: string; rank: number }[];
+}
+
+export interface ApplicantJ {
+    applicant_id: string;
+    name: string;
+    email: string;
+    skills: string[];
+    past_courses: PastCourseJ[];
+    teaching_experience: TeachingJ[];
+    recommendations: RecommendationJ[];
+    upcoming_schedule: TimeSlotJ[];
+    application: ApplicationJ | null;
+}
+
+export interface ApplicantRecord extends ApplicantJ { gpa: number | null }
+
+// --- CSV upload ---------------------------------------------------------------
+
+export type CsvKind = "sections" | "applicants";
+
+export interface CsvColumn { key: string; label: string; required: boolean; aliases: string[]; example: string }
+
+export interface CsvRowError { row: number; column: string | null; message: string }
+
+export interface CsvResult {
+    ok: boolean;
+    imported: boolean;
+    errors: CsvRowError[];
+    summary: Record<string, number>;
+    report?: { notes: string[] };
+    workspace?: WorkspaceSummary;
+}

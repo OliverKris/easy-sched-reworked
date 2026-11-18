@@ -35,8 +35,8 @@ SECTION_COLUMNS = [
     ("labs", "Labs", False, ["lab sections", "lab times", "lab"], "Fri 10:00-11:50; Fri 12:00-13:50"),
     ("la_count", "LAs needed", False, ["las", "la count", "number of las", "learning assistants"], "2"),
     ("uta_count", "UTAs needed", False, ["utas", "uta count", "number of utas", "undergraduate tas"], "1"),
-    ("la_attend_lecture", "LAs attend lecture", False, ["la must attend lecture"], "no"),
-    ("uta_attend_lecture", "UTAs attend lecture", False, ["uta must attend lecture"], "yes"),
+    ("la_attend_lecture", "LAs attend lecture", False, ["la must attend lecture", "la attends lecture", "las attend lecture", "la lecture"], "no"),
+    ("uta_attend_lecture", "UTAs attend lecture", False, ["uta must attend lecture", "uta attends lecture", "utas attend lecture", "uta lecture"], "yes"),
     ("skills", "Skills", False, ["skill tags", "topics", "tags"], "python; recursion"),
 ]
 
@@ -135,6 +135,8 @@ def parse_meetings(text: str, label: str = "") -> List[dict]:
             raise CellError(f"'{part}' should look like 'MW 10:00-11:15'")
         days = parse_days(m.group(1))
         start, end = parse_time(m.group(2)), parse_time(m.group(3))
+        if end <= start:
+            raise CellError(f"'{part.strip()}' ends before it starts")
         out.extend({"day": d, "start": start, "end": end, "label": label} for d in days)
     return out
 
@@ -316,6 +318,8 @@ def convert_section_rows(rows: List[Dict[str, str]], existing_titles: Dict[str, 
                 if not (days and cell.get("lecture_start") and cell.get("lecture_end")):
                     raise CellError("needs days, a start and an end together")
                 start, end = parse_time(cell["lecture_start"]), parse_time(cell["lecture_end"])
+                if end <= start:
+                    raise CellError(f"ends ({cell['lecture_end']}) before it starts ({cell['lecture_start']})")
                 lecture = [{"day": d, "start": start, "end": end, "label": "Lecture"} for d in days]
         except CellError as e:
             fail(row_no, "lecture_days", str(e))

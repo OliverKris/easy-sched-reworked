@@ -1,11 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+    addSection, listApplicants, listCourses, removeApplicant, removeCourse, removeSection, saveApplicant, saveCourse,
+    saveSection,
     createLock, createWorkspace, deleteLock, deleteWorkspace, fetchDataset, fetchLocks, finalizeSchedule,
     importAsNewWorkspace, importIntoWorkspace, renameWorkspace, resetWorkspace, runSolve, saveSettings,
     unfinalizeSchedule,
 } from "../lib/api";
 import { workspacesKey, type RuleSettings } from "../app/workspace";
-import type { DatasetKey, LockCreate, ServerSettings, SolverKind, WorkspacePart } from "../types";
+import type {
+    ApplicantJ, CourseJ, DatasetKey, LockCreate, SectionJ, ServerSettings, SolverKind, WorkspacePart,
+} from "../types";
 
 /**
  * Server state lives in TanStack Query: one key per resource, and mutations
@@ -123,5 +127,55 @@ export function useWorkspaceActions() {
                 importIntoWorkspace(v.id, v.bundle, v.parts),
             onSuccess: (_d, v) => refreshAll(v.id),
         }),
+    };
+}
+
+// --- Editing courses, sections, applicants ----------------------------------------
+
+export const editKeys = {
+    courses: (ws: string) => ["courses", ws] as const,
+    applicants: (ws: string) => ["applicants", ws] as const,
+};
+
+export function useCourses(ws: string) {
+    return useQuery({
+        queryKey: editKeys.courses(ws),
+        queryFn: () => listCourses(ws).then((r) => r.courses),
+        enabled: Boolean(ws),
+    });
+}
+
+export function useApplicants(ws: string) {
+    return useQuery({
+        queryKey: editKeys.applicants(ws),
+        queryFn: () => listApplicants(ws).then((r) => r.applicants),
+        enabled: Boolean(ws),
+    });
+}
+
+/** Any change to a workspace's data refreshes everything that reads it. */
+export function useRefreshWorkspace() {
+    const qc = useQueryClient();
+    return (ws: string) => Promise.all([
+        qc.invalidateQueries({ queryKey: workspacesKey }),
+        qc.invalidateQueries({ queryKey: editKeys.courses(ws) }),
+        qc.invalidateQueries({ queryKey: editKeys.applicants(ws) }),
+        qc.invalidateQueries({ queryKey: keys.dataset(ws) }),
+        qc.invalidateQueries({ queryKey: keys.locks(ws) }),
+        qc.invalidateQueries({ queryKey: keys.solveAll(ws) }),
+    ]);
+}
+
+export function useEditActions(ws: string) {
+    const refresh = useRefreshWorkspace();
+    const done = () => refresh(ws);
+    return {
+        saveCourse: useMutation({ mutationFn: (c: CourseJ) => saveCourse(ws, c), onSuccess: done }),
+        removeCourse: useMutation({ mutationFn: (id: string) => removeCourse(ws, id), onSuccess: done }),
+        addSection: useMutation({ mutationFn: (s: SectionJ) => addSection(ws, s), onSuccess: done }),
+        saveSection: useMutation({ mutationFn: (v: { id: number; section: SectionJ }) => saveSection(ws, v.id, v.section), onSuccess: done }),
+        removeSection: useMutation({ mutationFn: (id: number) => removeSection(ws, id), onSuccess: done }),
+        saveApplicant: useMutation({ mutationFn: (a: ApplicantJ) => saveApplicant(ws, a), onSuccess: done }),
+        removeApplicant: useMutation({ mutationFn: (id: string) => removeApplicant(ws, id), onSuccess: done }),
     };
 }

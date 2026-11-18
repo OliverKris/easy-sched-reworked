@@ -1,5 +1,14 @@
 import type {
+    ApplicantJ,
+    ApplicantRecord,
     CourseCreate,
+    CourseJ,
+    CourseRecord,
+    CsvColumn,
+    CsvKind,
+    CsvResult,
+    SectionJ,
+    SectionRecord,
     CourseUpdate,
     DatasetKey,
     DatasetResponse,
@@ -193,4 +202,54 @@ export function updateSection(dataset: DatasetKey, sectionDbId: number, payload:
 
 export function deleteSection(dataset: DatasetKey, sectionDbId: number) {
     return sendJSON(`/api/sections/${sectionDbId}?dataset=${ds(dataset)}`, "DELETE");
+}
+
+// --- Editing (workspace-scoped, validated) ---------------------------------------
+
+export function listCourses(ws: string): Promise<{ courses: CourseRecord[] }> {
+    return getJSON(`/api/workspaces/${ds(ws)}/courses`);
+}
+
+export function saveCourse(ws: string, course: CourseJ): Promise<CourseRecord> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/courses/${encodeURIComponent(course.course_id)}`, "PUT", course);
+}
+
+export function removeCourse(ws: string, courseId: string): Promise<null> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/courses/${encodeURIComponent(courseId)}`, "DELETE");
+}
+
+export function addSection(ws: string, section: SectionJ): Promise<SectionRecord> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/sections`, "POST", section);
+}
+
+export function saveSection(ws: string, id: number, section: SectionJ): Promise<SectionRecord> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/sections/${id}`, "PUT", section);
+}
+
+export function removeSection(ws: string, id: number): Promise<null> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/sections/${id}`, "DELETE");
+}
+
+export function listApplicants(ws: string): Promise<{ applicants: ApplicantRecord[] }> {
+    return getJSON(`/api/workspaces/${ds(ws)}/applicants`);
+}
+
+export function saveApplicant(ws: string, applicant: ApplicantJ): Promise<ApplicantRecord> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/applicants/${encodeURIComponent(applicant.applicant_id)}`, "PUT", applicant);
+}
+
+export function removeApplicant(ws: string, applicantId: string): Promise<null> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/applicants/${encodeURIComponent(applicantId)}`, "DELETE");
+}
+
+// --- CSV upload ----------------------------------------------------------------
+
+export function fetchCsvColumns(kind: CsvKind): Promise<{ columns: CsvColumn[] }> {
+    return getJSON(`/api/csv/columns/${kind}`);
+}
+
+export function uploadCsvRows(
+    ws: string, kind: CsvKind, rows: Record<string, string>[], mode: "merge" | "replace", dryRun: boolean,
+): Promise<CsvResult> {
+    return sendJSON(`/api/workspaces/${ds(ws)}/csv/${kind}`, "POST", { rows, mode, dry_run: dryRun });
 }

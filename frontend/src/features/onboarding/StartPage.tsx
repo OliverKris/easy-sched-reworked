@@ -29,13 +29,13 @@ export function StartPage() {
             key: "courses", title: "Add courses and sections", to: "/courses", cta: "Open courses",
             detail: "Each section's meeting times and how many LAs and UTAs it needs.",
             doneText: `${counts.sections} section${counts.sections === 1 ? "" : "s"} in ${counts.courses} course${counts.courses === 1 ? "" : "s"}`,
-            alt: { to: "/data", label: "Import from a file" },
+            alt: { to: "/courses/import", label: "Upload a spreadsheet" },
         },
         {
             key: "applicants", title: "Add applicants", to: "/applicants", cta: "Open applicants",
             detail: "Transcripts, schedules, experience, and the courses each person ranked.",
             doneText: `${counts.applicants} applicant${counts.applicants === 1 ? "" : "s"}`,
-            alt: { to: "/data", label: "Import from a file" },
+            alt: { to: "/applicants/import", label: "Upload a spreadsheet" },
         },
         {
             key: "schedule", title: "Assign and finalize", to: "/assign", cta: "Go to assignments",

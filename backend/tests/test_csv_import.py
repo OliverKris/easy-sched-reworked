@@ -150,3 +150,15 @@ def test_applicant_row_errors():
 def test_blank_lines_are_skipped():
     courses, sections, errors = c.convert_section_rows([section_row(), {k: "" for k in section_row()}], {})
     assert errors == [] and len(sections) == 1
+
+
+def test_a_row_reports_all_its_problems_at_once():
+    _, _, errors = c.convert_section_rows(
+        [section_row(term="Winter", lecture_start="3:45pm", lecture_end="2:00pm", labs="Fri 13:00-12:00")], {})
+    columns = sorted(e["column"] for e in errors)
+    assert columns == ["Labs", "Lecture days", "Term"]
+
+
+def test_attends_lecture_alias_matches():
+    aliases = {col["key"]: col["aliases"] for col in c.column_spec("sections")}
+    assert "uta attends lecture" in aliases["uta_attend_lecture"]
