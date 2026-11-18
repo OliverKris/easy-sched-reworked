@@ -16,7 +16,7 @@ Docs at http://127.0.0.1:8000/docs (FastAPI's auto-generated Swagger UI).
 """
 
 from contextlib import asynccontextmanager
-from typing import Literal, List, Optional
+from typing import Dict, Literal, List, Optional
 
 from fastapi import Header, Response, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +29,9 @@ from ta_assignment.db.seed import SEED_LOADERS, ensure_seeded, reset_dataset
 from ta_assignment.db import workspaces as ws_repo
 from ta_assignment.db import bundle as bundle_io
 from ta_assignment.db.bundle import SettingsJ
+from ta_assignment.db import editing
+from ta_assignment.db import csv_import as csv_io
+from collections import Counter
 from ta_assignment.db.session import get_db, init_db
 from ta_assignment.enums import PositionType
 from ta_assignment.locks import LockType
@@ -878,3 +881,174 @@ def import_into_workspace(workspace_id: str, payload: BundleImport, db: Session 
     except bundle_io.BundleError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"workspace": ws_repo.summarize(db, ws), "report": report}
+
+
+# ---------------------------------------------------------------------------
+# Editing courses, sections and applicants, and CSV upload. Workspace-scoped
+# and validated with the workspace-file models (see db/editing.py,
+# db/csv_import.py).
+# ---------------------------------------------------------------------------
+
+def _parse_body(model, body: dict):
+    try:
+        return model.model_validate(body)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=_validation_message(e))
+
+
+def _edit(fn, *args):
+    try:
+        return fn(*args)
+    except editing.EditError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+
+
+@app.get("/api/workspaces/{workspace_id}/courses")
+def ws_list_courses(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    return {"courses": editing.list_courses(db, ws.id)}
+
+
+@app.put("/api/workspaces/{workspace_id}/courses/{course_id}")
+def ws_save_course(workspace_id: str, course_id: str, body: dict, db: Session = Depends(get_db),
+                   client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    return _edit(editing.save_course, db, ws.id, course_id, _parse_body(bundle_io.CourseJ, body))
+
+
+@app.delete("/api/workspaces/{workspace_id}/courses/{course_id}", status_code=204)
+def ws_delete_course(workspace_id: str, course_id: str, db: Session = Depends(get_db),
+                     client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    _edit(editing.delete_course, db, ws.id, course_id)
+
+
+@app.post("/api/workspaces/{workspace_id}/sections", status_code=201)
+def ws_create_section(workspace_id: str, body: dict, db: Session = Depends(get_db),
+                      client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    return _edit(editing.create_section, db, ws.id, _parse_body(bundle_io.SectionJ, body))
+
+
+@app.put("/api/workspaces/{workspace_id}/sections/{section_db_id}")
+def ws_update_section(workspace_id: str, section_db_id: int, body: dict, db: Session = Depends(get_db),
+                      client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    return _edit(editing.update_section, db, ws.id, section_db_id, _parse_body(bundle_io.SectionJ, body))
+
+
+@app.delete("/api/workspaces/{workspace_id}/sections/{section_db_id}", status_code=204)
+def ws_delete_section(workspace_id: str, section_db_id: int, db: Session = Depends(get_db),
+                      client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    _edit(editing.delete_section, db, ws.id, section_db_id)
+
+
+@app.get("/api/workspaces/{workspace_id}/applicants")
+def ws_list_applicants(workspace_id: str, db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    return {"applicants": editing.list_applicants(db, ws.id)}
+
+
+@app.put("/api/workspaces/{workspace_id}/applicants/{applicant_id}")
+def ws_save_applicant(workspace_id: str, applicant_id: str, body: dict, db: Session = Depends(get_db),
+                      client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    return _edit(editing.save_applicant, db, ws.id, applicant_id, _parse_body(bundle_io.ApplicantJ, body))
+
+
+@app.delete("/api/workspaces/{workspace_id}/applicants/{applicant_id}", status_code=204)
+def ws_delete_applicant(workspace_id: str, applicant_id: str, db: Session = Depends(get_db),
+                        client: Optional[str] = Depends(client_id)):
+    ws = _owned(db, workspace_id, client)
+    _edit(editing.delete_applicant, db, ws.id, applicant_id)
+
+
+MAX_CSV_ROWS = 5000
+
+
+@app.get("/api/csv/columns/{kind}")
+def csv_columns(kind: Literal["sections", "applicants"]):
+    """Column names, labels, aliases and examples, for matching headers and building templates."""
+    return {"kind": kind, "columns": csv_io.column_spec(kind)}
+
+
+class CsvImport(BaseModel):
+    rows: List[Dict[str, Optional[str]]]
+    mode: Literal["merge", "replace"] = "merge"
+    dry_run: bool = True
+    term: Optional[str] = None   # applications' term/year; defaults to the workspace's sections
+    year: Optional[int] = None
+
+
+def _default_term(db: Session, dataset: str) -> tuple:
+    sections = repo.get_sections(db, dataset)
+    if sections:
+        pairs = Counter((s.term.name, s.year) for s in sections)
+        return pairs.most_common(1)[0][0]
+    from datetime import date
+    return ("FALL", date.today().year)
+
+
+@app.post("/api/workspaces/{workspace_id}/csv/{kind}")
+def csv_upload(workspace_id: str, kind: Literal["sections", "applicants"], payload: CsvImport,
+               db: Session = Depends(get_db), client: Optional[str] = Depends(client_id)):
+    """Converts and validates spreadsheet rows; with dry_run=false and no errors, imports them.
+
+    mode="merge" adds new rows and updates ones with the same id; "replace"
+    swaps out everything of that kind. Nothing is saved if any row has a problem.
+    """
+    ws = _owned(db, workspace_id, client)
+    if len(payload.rows) > MAX_CSV_ROWS:
+        raise HTTPException(status_code=400, detail=f"Up to {MAX_CSV_ROWS} rows per upload")
+    rows = [{k: (v or "") for k, v in r.items()} for r in payload.rows]
+
+    if kind == "sections":
+        existing = {c.course_id: c.title for c in repo.get_courses(db, ws.id).values()}
+        courses, sections, errors = csv_io.convert_section_rows(rows, existing if payload.mode == "merge" else {})
+        existing_keys = {(s.course.course_id, s.section_number, s.term.name, s.year) for s in repo.get_sections(db, ws.id)}
+        new = sum(1 for s in sections if s.key not in existing_keys)
+        summary = {"courses": len(courses), "sections": len(sections),
+                   "new": new, "updated": len(sections) - new if payload.mode == "merge" else 0}
+        bundle = bundle_io.Bundle(format="easy-sched.workspace", version=1, courses=courses, sections=sections)
+        parts = ["courses"]
+    else:
+        term, year = _default_term(db, ws.id)
+        try:
+            term = csv_io.parse_term(payload.term) if payload.term else term
+        except csv_io.CellError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        applicants, errors = csv_io.convert_applicant_rows(rows, term, payload.year or year)
+        existing_ids = set(repo.get_applicants(db, ws.id))
+        new = sum(1 for a in applicants if a.applicant_id not in existing_ids)
+        summary = {"applicants": len(applicants), "new": new,
+                   "updated": len(applicants) - new if payload.mode == "merge" else 0}
+        # Duplicate ids inside the file are a row problem, not a server error.
+        seen: Dict[str, int] = {}
+        for i, r in enumerate(rows):
+            aid = (r.get("applicant_id") or "").strip()
+            if aid and aid in seen:
+                errors.append({"row": i + 2, "column": "Student ID", "message": f"{aid} also appears on row {seen[aid]}"})
+            elif aid:
+                seen[aid] = i + 2
+        bundle = bundle_io.Bundle(format="easy-sched.workspace", version=1, applicants=applicants)
+        parts = ["applicants"]
+
+    if kind == "sections":
+        seen_keys: Dict[tuple, int] = {}
+        for i, r in enumerate(rows):
+            key = tuple((r.get(k) or "").strip().upper() for k in ("course_id", "section", "term", "year"))
+            if all(key) and key in seen_keys:
+                errors.append({"row": i + 2, "column": "Section", "message": f"same section as row {seen_keys[key]}"})
+            elif all(key):
+                seen_keys[key] = i + 2
+
+    errors.sort(key=lambda e: e["row"])
+    result = {"ok": not errors, "errors": errors, "summary": summary, "imported": False}
+    if errors or payload.dry_run:
+        return result
+    try:
+        report = bundle_io.import_into(db, ws, bundle, parts, mode=payload.mode)
+    except bundle_io.BundleError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {**result, "imported": True, "report": report, "workspace": ws_repo.summarize(db, ws)}

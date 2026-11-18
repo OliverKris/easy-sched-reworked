@@ -23,7 +23,7 @@ parts the file contains (and the caller selects).
 from datetime import datetime, timezone
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
@@ -52,11 +52,26 @@ def _enum_name(enum, value: str, what: str) -> str:
     return value
 
 
+def _minutes(hhmm: str) -> int:
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
 class TimeSlotJ(_M):
     day: str
     start: str = Field(pattern=r"^\d{1,2}:\d{2}$")
     end: str = Field(pattern=r"^\d{1,2}:\d{2}$")
     label: str = ""
+
+    @model_validator(mode="after")
+    def check_order(self):
+        for t in (self.start, self.end):
+            h, m = t.split(":")
+            if not (0 <= int(h) <= 23 and 0 <= int(m) <= 59):
+                raise ValueError(f"'{t}' isn't a valid time")
+        if _minutes(self.end) <= _minutes(self.start):
+            raise ValueError(f"ends ({self.end}) before it starts ({self.start})")
+        return self
     @field_validator("day")
     @classmethod
     def check_day(cls, v):
@@ -90,6 +105,22 @@ class SectionJ(_M):
     uta_hours_per_week: float = 10.0
     uta_must_attend_lecture: bool = False
     la_must_attend_lecture: bool = False
+
+    @model_validator(mode="after")
+    def check_labs(self):
+        ids = [lab.lab_id for lab in self.labs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("two labs share the same lab id")
+        return self
+
+    @property
+    def key(self) -> tuple:
+        return (self.course_id, self.section_number, self.term, self.year)
+
+    @property
+    def section_id(self) -> str:
+        """Same string as the domain Section.section_id (what locks refer to)."""
+        return f"{self.course_id}-{self.section_number} ({Semester[self.term].value} {self.year})"
     @field_validator("term")
     @classmethod
     def check_term(cls, v):
@@ -153,6 +184,16 @@ class ApplicationJ(_M):
     @classmethod
     def _positions(cls, v):
         return [_enum_name(PositionType, p, "position") for p in v]
+
+    @model_validator(mode="after")
+    def check_preferences(self):
+        ranks = [p.rank for p in self.ranked_preferences]
+        courses = [p.course_id for p in self.ranked_preferences]
+        if len(ranks) != len(set(ranks)):
+            raise ValueError("two preferences share the same rank")
+        if len(courses) != len(set(courses)):
+            raise ValueError("the same course is ranked twice")
+        return self
 
 
 class ApplicantJ(_M):
@@ -272,12 +313,19 @@ def parse_bundle(data: dict) -> Bundle:
     return Bundle.model_validate(data)
 
 
-def import_into(db: Session, ws: WorkspaceModel, bundle: Bundle, parts: Optional[List[str]] = None) -> dict:
-    """Replaces the selected parts of `ws` with the bundle's. All or nothing:
-    if anything doesn't fit together, nothing is changed. Returns a report."""
+def import_into(db: Session, ws: WorkspaceModel, bundle: Bundle, parts: Optional[List[str]] = None,
+                mode: Literal["replace", "merge"] = "replace") -> dict:
+    """Brings the selected parts of the bundle into `ws`. All or nothing: if
+    anything doesn't fit together, nothing is changed. Returns a report.
+
+    mode="replace": each selected part replaces what the workspace had.
+    mode="merge":   courses, sections and applicants in the file are added, or
+                    replace the ones with the same id; everything else stays.
+    """
     chosen = [p for p in (parts or bundle.present_parts()) if p in bundle.present_parts()]
     dataset = ws.id
-    report = {"imported": chosen, "counts": {}, "notes": []}
+    merge = mode == "merge"
+    report = {"imported": chosen, "mode": mode, "counts": {}, "notes": []}
 
     try:
         if "courses" in chosen:
@@ -286,12 +334,26 @@ def import_into(db: Session, ws: WorkspaceModel, bundle: Bundle, parts: Optional
             ids = [c.course_id for c in courses]
             if len(ids) != len(set(ids)):
                 raise BundleError("Two courses share the same course_id")
-            known = set(ids)
+            keys = [s.key for s in sections]
+            if len(keys) != len(set(keys)):
+                dup = next(k for k in keys if keys.count(k) > 1)
+                raise BundleError(f"Section {dup[0]}-{dup[1]} ({dup[2].title()} {dup[3]}) appears twice")
+            existing_courses = set(repo.get_courses(db, dataset)) if merge else set()
+            known = set(ids) | existing_courses
             for s in sections:
                 if s.course_id not in known:
-                    raise BundleError(f"Section {s.course_id}-{s.section_number} refers to a course that isn't in the file")
-            db.execute(delete(SectionModel).where(SectionModel.dataset == dataset))
-            db.execute(delete(CourseModel).where(CourseModel.dataset == dataset))
+                    raise BundleError(f"Section {s.course_id}-{s.section_number} refers to course {s.course_id}, which doesn't exist")
+            if merge:
+                for c in courses:
+                    db.execute(delete(CourseModel).where(CourseModel.dataset == dataset, CourseModel.course_id == c.course_id))
+                for s in sections:
+                    db.execute(delete(SectionModel).where(
+                        SectionModel.dataset == dataset, SectionModel.course_id == s.course_id,
+                        SectionModel.section_number == s.section_number, SectionModel.term == s.term,
+                        SectionModel.year == s.year))
+            else:
+                db.execute(delete(SectionModel).where(SectionModel.dataset == dataset))
+                db.execute(delete(CourseModel).where(CourseModel.dataset == dataset))
             for c in courses:
                 db.add(CourseModel(dataset=dataset, **c.model_dump()))
             for s in sections:
@@ -303,9 +365,15 @@ def import_into(db: Session, ws: WorkspaceModel, bundle: Bundle, parts: Optional
             applicants = bundle.applicants or []
             ids = [a.applicant_id for a in applicants]
             if len(ids) != len(set(ids)):
-                raise BundleError("Two applicants share the same applicant_id")
-            db.execute(delete(ApplicationModel).where(ApplicationModel.dataset == dataset))
-            db.execute(delete(ApplicantModel).where(ApplicantModel.dataset == dataset))
+                dup = next(i for i in ids if ids.count(i) > 1)
+                raise BundleError(f"Applicant {dup} appears twice")
+            if merge:
+                for i in ids:
+                    db.execute(delete(ApplicationModel).where(ApplicationModel.dataset == dataset, ApplicationModel.applicant_id == i))
+                    db.execute(delete(ApplicantModel).where(ApplicantModel.dataset == dataset, ApplicantModel.applicant_id == i))
+            else:
+                db.execute(delete(ApplicationModel).where(ApplicationModel.dataset == dataset))
+                db.execute(delete(ApplicantModel).where(ApplicantModel.dataset == dataset))
             for a in applicants:
                 fields = a.model_dump(exclude={"application"})
                 db.add(ApplicantModel(dataset=dataset, **fields))

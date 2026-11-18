@@ -221,7 +221,7 @@ def test_import_is_all_or_nothing(client):
               "courses": [{"course_id": "A", "title": "A"}],
               "sections": [{"course_id": "MISSING", "section_number": "1", "term": "FALL", "year": 2026}]}
     res = client.post(f"/api/workspaces/{ws['id']}/import", json={"bundle": broken}, headers=ALICE)
-    assert res.status_code == 400 and "isn't in the file" in res.json()["detail"]
+    assert res.status_code == 400 and "doesn't exist" in res.json()["detail"]
     assert client.get(f"/api/workspaces/{ws['id']}", headers=ALICE).json()["counts"] == before
 
 
