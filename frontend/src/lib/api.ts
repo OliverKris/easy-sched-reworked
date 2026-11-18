@@ -4,48 +4,110 @@ import type {
     DatasetKey,
     DatasetResponse,
     EligibilityResponse,
+    ImportResult,
     Lock,
     LockCreate,
     RecommendationsResponse,
     ScoringWeights,
     SectionCreate,
     SectionUpdate,
+    ServerSettings,
     SolveResponse,
     SolverKind,
+    WorkspaceFile,
+    WorkspacePart,
+    WorkspaceSummary,
 } from "../types";
+import { getClientId } from "./clientId";
 
-// Generic async function for API requests
-async function getJSON<T>(url: string): Promise<T> {
-    const res = await fetch(url);
+/**
+ * Every request goes through here: it identifies this browser (so the server
+ * only shows its own workspaces) and turns FastAPI's {"detail": ...} error
+ * bodies into readable Error messages.
+ */
+async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
+    const headers = new Headers(init.headers);
+    headers.set("X-Client-Id", getClientId());
+    if (init.body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+
+    const res = await fetch(url, { ...init, headers });
     if (!res.ok) {
-        throw new Error(`${url} -> ${res.status} ${res.statusText}`);
-    }
-    return res.json() as Promise<T>
-}
-
-async function sendJSON<T>(url: string, method: "POST" | "PUT" | "DELETE", body?: unknown): Promise<T | null> {
-    const res = await fetch(url, {
-        method,
-        headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    if(!res.ok) {
-        // FastAPI error bodies are {"detail": "..."} -- surface that if present.
         let detail = `${res.status} ${res.statusText}`;
         try {
-            const parsed = await res.json()
-            if(parsed?.detail) detail = parsed.detail
+            const parsed = await res.json();
+            if (typeof parsed?.detail === "string") detail = parsed.detail;
+            else if (parsed?.detail) detail = JSON.stringify(parsed.detail);
         } catch {
-            // body wasn't JSON; fall back to statusText
+            // body wasn't JSON; keep the status text
         }
         throw new Error(detail);
     }
-    if (res.status === 204) return null; // no body
-    return res.json() as Promise<T>
+    if (res.status === 204) return null as T;
+    const type = res.headers.get("Content-Type") ?? "";
+    return (type.includes("application/json") ? res.json() : res.text()) as Promise<T>;
 }
 
+const getJSON = <T>(url: string) => request<T>(url);
+const sendJSON = <T>(url: string, method: "POST" | "PUT" | "PATCH" | "DELETE", body?: unknown) =>
+    request<T>(url, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+
+const ds = (dataset: DatasetKey) => encodeURIComponent(dataset);
+
+// --- Workspaces ----------------------------------------------------------------
+
+export function listWorkspaces(): Promise<{ workspaces: WorkspaceSummary[] }> {
+    return getJSON("/api/workspaces");
+}
+
+export function createWorkspace(name: string, sample?: "extended" | "demo"): Promise<WorkspaceSummary> {
+    return sendJSON("/api/workspaces", "POST", { name, sample: sample ?? null });
+}
+
+export function renameWorkspace(id: string, name: string): Promise<WorkspaceSummary> {
+    return sendJSON(`/api/workspaces/${ds(id)}`, "PATCH", { name });
+}
+
+export function deleteWorkspace(id: string): Promise<null> {
+    return sendJSON(`/api/workspaces/${ds(id)}`, "DELETE");
+}
+
+export function resetWorkspace(id: string): Promise<WorkspaceSummary> {
+    return sendJSON(`/api/workspaces/${ds(id)}/reset`, "POST");
+}
+
+export function saveSettings(id: string, settings: ServerSettings): Promise<WorkspaceSummary> {
+    return sendJSON(`/api/workspaces/${ds(id)}/settings`, "PUT", settings);
+}
+
+export function finalizeSchedule(id: string): Promise<WorkspaceSummary> {
+    return sendJSON(`/api/workspaces/${ds(id)}/schedule`, "POST");
+}
+
+export function unfinalizeSchedule(id: string): Promise<null> {
+    return sendJSON(`/api/workspaces/${ds(id)}/schedule`, "DELETE");
+}
+
+export function exportWorkspace(id: string, parts?: WorkspacePart[]): Promise<WorkspaceFile> {
+    const q = parts && parts.length ? `?parts=${parts.join(",")}` : "";
+    return getJSON(`/api/workspaces/${ds(id)}/export${q}`);
+}
+
+export function fetchScheduleCsv(id: string): Promise<string> {
+    return request<string>(`/api/workspaces/${ds(id)}/schedule.csv`);
+}
+
+export function importAsNewWorkspace(bundle: unknown, parts?: WorkspacePart[], name?: string): Promise<ImportResult> {
+    return sendJSON("/api/workspaces/import", "POST", { bundle, parts: parts ?? null, name: name ?? null });
+}
+
+export function importIntoWorkspace(id: string, bundle: unknown, parts?: WorkspacePart[]): Promise<ImportResult> {
+    return sendJSON(`/api/workspaces/${ds(id)}/import`, "POST", { bundle, parts: parts ?? null });
+}
+
+// --- Workspace data ------------------------------------------------------------
+
 export function fetchDataset(dataset: DatasetKey): Promise<DatasetResponse> {
-    return getJSON(`/api/dataset?dataset=${dataset}`);
+    return getJSON(`/api/dataset?dataset=${ds(dataset)}`);
 }
 
 export function fetchEligibility(
@@ -60,46 +122,38 @@ export function fetchEligibility(
 }
 
 export interface SolveParams {
-    dataset: DatasetKey,
+    dataset: DatasetKey;
     minGpa?: number | null;
     minGpaUta?: number | null;
     weights: ScoringWeights;
     solver?: SolverKind;
 }
 
-export async function runSolve(params: SolveParams): Promise<SolveResponse> {
-    const res = await fetch("/api/solve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            dataset: params.dataset,
-            min_gpa: params.minGpa ?? null,
-            min_gpa_uta: params.minGpaUta ?? null,
-            weights: params.weights,
-            solver: params.solver ?? "matching",
-        }),
+export function runSolve(params: SolveParams): Promise<SolveResponse> {
+    return sendJSON("/api/solve", "POST", {
+        dataset: params.dataset,
+        min_gpa: params.minGpa ?? null,
+        min_gpa_uta: params.minGpaUta ?? null,
+        weights: params.weights,
+        solver: params.solver ?? "matching",
     });
-    if (!res.ok) {
-        throw new Error(`/api/solve -> ${res.status} ${res.statusText}`);
-    }
-    return res.json();
 }
 
-// Locks / Blocks
+// --- Locks / blocks ------------------------------------------------------------
 
 export function fetchLocks(dataset: DatasetKey): Promise<{ locks: Lock[] }> {
-    return getJSON(`/api/locks?dataset=${dataset}`);
+    return getJSON(`/api/locks?dataset=${ds(dataset)}`);
 }
 
 export function createLock(dataset: DatasetKey, payload: LockCreate): Promise<Lock> {
-    return sendJSON<Lock>(`/api/locks?dataset=${dataset}`, "POST", payload) as Promise<Lock>;
+    return sendJSON(`/api/locks?dataset=${ds(dataset)}`, "POST", payload);
 }
 
 export function deleteLock(dataset: DatasetKey, lockId: number): Promise<null> {
-    return sendJSON<null>(`/api/locks/${lockId}?dataset=${dataset}`, "DELETE");
+    return sendJSON(`/api/locks/${lockId}?dataset=${ds(dataset)}`, "DELETE");
 }
 
-// Recommendations
+// --- Recommendations -----------------------------------------------------------
 
 export function fetchRecommendations(
     dataset: DatasetKey,
@@ -109,36 +163,34 @@ export function fetchRecommendations(
     minGpa?: number | null,
     minGpaUta?: number | null,
 ): Promise<RecommendationsResponse> {
-    const params = new URLSearchParams({
-        dataset, section_id: sectionId, position, limit: String(limit),
-    });
+    const params = new URLSearchParams({ dataset, section_id: sectionId, position, limit: String(limit) });
     if (minGpa !== null && minGpa !== undefined) params.set("min_gpa", String(minGpa));
     if (minGpaUta !== null && minGpaUta !== undefined) params.set("min_gpa_uta", String(minGpaUta));
     return getJSON(`/api/recommendations?${params.toString()}`);
 }
 
-// Course / Section CRUD
+// --- Course / section CRUD -----------------------------------------------------
 
 export function createCourse(dataset: DatasetKey, payload: CourseCreate) {
-    return sendJSON(`/api/courses?dataset=${dataset}`, "POST", payload);
+    return sendJSON(`/api/courses?dataset=${ds(dataset)}`, "POST", payload);
 }
 
 export function updateCourse(dataset: DatasetKey, courseId: string, payload: CourseUpdate) {
-    return sendJSON(`/api/courses/${encodeURIComponent(courseId)}?dataset=${dataset}`, "PUT", payload);
+    return sendJSON(`/api/courses/${encodeURIComponent(courseId)}?dataset=${ds(dataset)}`, "PUT", payload);
 }
 
 export function deleteCourse(dataset: DatasetKey, courseId: string) {
-    return sendJSON(`/api/courses/${encodeURIComponent(courseId)}?dataset=${dataset}`, "DELETE");
+    return sendJSON(`/api/courses/${encodeURIComponent(courseId)}?dataset=${ds(dataset)}`, "DELETE");
 }
 
 export function createSection(dataset: DatasetKey, payload: SectionCreate) {
-    return sendJSON(`/api/sections?dataset=${dataset}`, "POST", payload);
+    return sendJSON(`/api/sections?dataset=${ds(dataset)}`, "POST", payload);
 }
 
 export function updateSection(dataset: DatasetKey, sectionDbId: number, payload: SectionUpdate) {
-    return sendJSON(`/api/sections/${sectionDbId}?dataset=${dataset}`, "PUT", payload);
+    return sendJSON(`/api/sections/${sectionDbId}?dataset=${ds(dataset)}`, "PUT", payload);
 }
 
 export function deleteSection(dataset: DatasetKey, sectionDbId: number) {
-    return sendJSON(`/api/sections/${sectionDbId}?dataset=${dataset}`, "DELETE");
+    return sendJSON(`/api/sections/${sectionDbId}?dataset=${ds(dataset)}`, "DELETE");
 }

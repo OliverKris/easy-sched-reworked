@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
-import { useDataset, useLocks, useSolve } from "../../api/hooks";
+import { useDataset, useLocks, useSolve, useWorkspaceActions } from "../../api/hooks";
 import { useWorkspace } from "../../app/workspace";
-import { Badge, Button, Spinner, VisuallyHidden } from "../../design/components";
+import { Badge, Button, EmptyState, Hint, Spinner, VisuallyHidden } from "../../design/components";
+import { ButtonLink } from "../../design/links";
+import { fetchScheduleCsv } from "../../lib/api";
+import { downloadText, safeFilename } from "../../lib/workspaceFile";
 import { AlertIcon, CheckIcon } from "../../design/icons";
 import type { SolvedSlot } from "../../types";
 import { CourseCard } from "./SectionCard";
@@ -11,7 +14,8 @@ import { groupSlots, matchesFilter, resolveSelection, type Selection, type SlotF
 const fmtGpa = (v: number | null) => (v == null ? "any" : v.toFixed(1));
 
 export function AssignPage() {
-    const { dataset, settings } = useWorkspace();
+    const { dataset, settings, current } = useWorkspace();
+    const wsActions = useWorkspaceActions();
     const datasetQuery = useDataset(dataset);
     const locksQuery = useLocks(dataset);
     const solveQuery = useSolve(dataset, settings);
@@ -60,13 +64,42 @@ export function AssignPage() {
                         </div>
                     )}
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    {solveQuery.isFetching && <Spinner label="Solving" />}
-                    <Button variant="primary" disabled={solveQuery.isFetching} onClick={() => solveQuery.refetch()}>
-                        Re-run, keep locks
-                    </Button>
-                </div>
+                {result && result.total_slots > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                        {solveQuery.isFetching && <Spinner label="Solving" />}
+                        <Button disabled={solveQuery.isFetching} onClick={() => solveQuery.refetch()}>
+                            Re-run, keep locks
+                        </Button>
+                        <Button
+                            variant="primary"
+                            disabled={wsActions.finalize.isPending || result.filled === 0}
+                            onClick={() => current && wsActions.finalize.mutate(current.id)}
+                        >
+                            {current?.finalized_at ? "Update final schedule" : "Mark as final"}
+                        </Button>
+                    </div>
+                )}
             </header>
+
+            {current?.finalized_at && (
+                <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg border border-line bg-surface text-[13px]">
+                    <Badge tone="accent"><CheckIcon />Final</Badge>
+                    <span className="text-ink-2">
+                        Marked final {new Date(current.finalized_at).toLocaleString()}. Changes you make after this aren't in the
+                        final schedule until you update it.
+                    </span>
+                    <span className="flex gap-2 ml-auto">
+                        <Button size="sm" onClick={async () => downloadText(
+                            `${safeFilename(current.name)}-schedule.csv`, await fetchScheduleCsv(current.id), "text/csv")}>
+                            Download CSV
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => wsActions.unfinalize.mutate(current.id)}>Unmark</Button>
+                    </span>
+                </div>
+            )}
+            {wsActions.finalize.error && (
+                <p role="alert" className="m-0 text-[13px] text-danger">{wsActions.finalize.error.message}</p>
+            )}
 
             <p className="m-0 text-[13px] text-ink-3">
                 Rules: GPA at least {fmtGpa(settings.minGpa)} for LAs and {fmtGpa(settings.minGpaUta ?? settings.minGpa)} for UTAs,
@@ -88,7 +121,24 @@ export function AssignPage() {
 
             {!result && !error && <Spinner label="Solving" />}
 
-            {result && (
+            {result && result.total_slots === 0 && (
+                <EmptyState
+                    title="Nothing to assign yet"
+                    action={<ButtonLink to="/start" variant="primary">Back to Getting started</ButtonLink>}
+                >
+                    Assignments appear here once the workspace has sections that need LAs or UTAs and
+                    applicants who applied for them.
+                </EmptyState>
+            )}
+
+            {result && result.total_slots > 0 && (
+                <Hint id="assign-intro">
+                    Click any slot to see why that person was placed there and who else could take it. Lock people in or
+                    keep them out, and the board re-solves around your choices.
+                </Hint>
+            )}
+
+            {result && result.total_slots > 0 && (
                 <>
                     <div className="flex flex-wrap gap-2 items-center">
                         <label className="flex-[1_1_260px] max-w-90 flex">

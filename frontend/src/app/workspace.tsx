@@ -1,10 +1,12 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { DEFAULT_WEIGHTS, type DatasetKey, type ScoringWeights } from "../types";
+import { useQuery } from "@tanstack/react-query";
+import { listWorkspaces } from "../lib/api";
+import type { ScoringWeights, WorkspaceSummary } from "../types";
 
 /**
- * The workspace the coordinator is working in (which dataset/term) and the
- * rule settings every solve uses. Lives in context so the sidebar's switcher
- * and every screen agree.
+ * Which of this browser's workspaces is open. The list comes from the server
+ * (workspaces belong to this browser's client id); only the choice of which
+ * one is open is remembered locally.
  */
 export interface RuleSettings {
     minGpa: number | null;
@@ -13,45 +15,59 @@ export interface RuleSettings {
 }
 
 interface WorkspaceValue {
-    dataset: DatasetKey;
-    setDataset: (d: DatasetKey) => void;
+    status: "loading" | "error" | "empty" | "ready";
+    error: Error | null;
+    workspaces: WorkspaceSummary[];
+    current: WorkspaceSummary | null;
+    /** The open workspace's id, used as the `dataset` key on data requests. */
+    dataset: string;
     settings: RuleSettings;
-    setSettings: (s: RuleSettings) => void;
+    open: (id: string) => void;
+}
+
+const STORAGE_KEY = "easy-sched.workspace";
+
+function readStored(): string | null {
+    try {
+        return window.localStorage.getItem(STORAGE_KEY);
+    } catch {
+        return null;
+    }
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export const WORKSPACES: { key: DatasetKey; name: string; detail: string }[] = [
-    { key: "extended", name: "Fall 2026 sample", detail: "14 applicants, edge cases" },
-    { key: "demo", name: "Small demo", detail: "4 applicants" },
-];
-
-const DEFAULT_SETTINGS: RuleSettings = { minGpa: 3.0, minGpaUta: 3.3, weights: DEFAULT_WEIGHTS };
-const STORAGE_KEY = "easy-sched.workspace";
-
-function readStoredDataset(): DatasetKey {
-    try {
-        const v = window.localStorage.getItem(STORAGE_KEY);
-        return v === "demo" || v === "extended" ? v : "extended";
-    } catch {
-        return "extended";
-    }
-}
+export const workspacesKey = ["workspaces"] as const;
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-    const [dataset, setDatasetState] = useState<DatasetKey>(readStoredDataset);
-    const [settings, setSettings] = useState<RuleSettings>(DEFAULT_SETTINGS);
+    const [chosenId, setChosenId] = useState<string | null>(readStored);
+    const query = useQuery({ queryKey: workspacesKey, queryFn: () => listWorkspaces().then((r) => r.workspaces) });
 
-    const value = useMemo<WorkspaceValue>(() => ({
-        dataset,
-        setDataset: (d) => {
-            setDatasetState(d);
-            try { window.localStorage.setItem(STORAGE_KEY, d); } catch { /* storage unavailable */ }
-        },
-        settings,
-        setSettings,
-    }), [dataset, settings]);
+    const value = useMemo<WorkspaceValue>(() => {
+        const workspaces = query.data ?? [];
+        const current = workspaces.find((w) => w.id === chosenId) ?? workspaces[0] ?? null;
+        const s = current?.settings;
+        return {
+            status: query.isPending ? "loading" : query.isError ? "error" : workspaces.length === 0 ? "empty" : "ready",
+            error: query.error,
+            workspaces,
+            current,
+            dataset: current?.id ?? "",
+            settings: {
+                minGpa: s?.min_gpa ?? null,
+                minGpaUta: s?.min_gpa_uta ?? null,
+                weights: s?.weights ?? {
+                    grade_weight: 3, experience_weight: 2.5, recommendation_weight: 2,
+                    preference_weight: 2.5, skill_match_weight: 1, uta_readiness_bonus: 1.5,
+                },
+            },
+            open: (id: string) => {
+                setChosenId(id);
+                try { window.localStorage.setItem(STORAGE_KEY, id); } catch { /* storage unavailable */ }
+            },
+        };
+    }, [query.data, query.isPending, query.isError, query.error, chosenId]);
 
     return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 /* Small, owned building blocks. Everything else is composed from these. */
 
@@ -71,5 +71,58 @@ export function Spinner({ label = "Loading" }: { label?: string }) {
             </svg>
             {label}
         </span>
+    );
+}
+
+/** A short, dismissible tip. Dismissal is remembered in this browser. */
+export function Hint({ id, children }: { id: string; children: ReactNode }) {
+    const key = `easy-sched.hint.${id}`;
+    const [hidden, setHidden] = useState(() => {
+        try { return window.localStorage.getItem(key) === "dismissed"; } catch { return false; }
+    });
+    if (hidden) return null;
+    return (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg border border-line bg-accent-tint text-[13px] text-ink-2">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" className="flex-none mt-0.5 text-accent">
+                <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M8 7.2v4M8 4.6v.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <div className="flex-1 min-w-0">{children}</div>
+            <button
+                type="button"
+                onClick={() => {
+                    setHidden(true);
+                    try { window.localStorage.setItem(key, "dismissed"); } catch { /* storage unavailable */ }
+                }}
+                className="flex-none -m-1 p-1 rounded text-ink-3 hover:text-ink cursor-pointer"
+                aria-label="Dismiss tip"
+            >
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+            </button>
+        </div>
+    );
+}
+
+/** What a screen shows when there's nothing in it yet: what's missing and the next action. */
+export function EmptyState({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
+    return (
+        <div className="flex flex-col items-start gap-3 px-6 py-8 rounded-lg border border-dashed border-control bg-surface">
+            <h2 className="m-0 text-[15px] font-semibold">{title}</h2>
+            {children && <div className="text-ink-2 max-w-xl">{children}</div>}
+            {action}
+        </div>
+    );
+}
+
+/** Page title block shared by every screen. */
+export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
+    return (
+        <header className="flex flex-wrap justify-between items-end gap-4">
+            <div className="flex flex-col gap-1">
+                <h1 className="m-0 text-[26px] font-semibold tracking-tight">{title}</h1>
+                {description && <p className="m-0 text-ink-3 max-w-2xl">{description}</p>}
+            </div>
+            {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+        </header>
     );
 }

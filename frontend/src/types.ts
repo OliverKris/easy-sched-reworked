@@ -1,4 +1,45 @@
-export type DatasetKey = "demo" | "extended";
+/** A workspace id (or one of the shared sample datasets, "demo" / "extended"). */
+export type DatasetKey = string;
+
+export type WorkspacePart = "settings" | "courses" | "applicants" | "locks" | "schedule";
+export const WORKSPACE_PARTS: WorkspacePart[] = ["settings", "courses", "applicants", "locks", "schedule"];
+
+/** Rule settings as the server stores them. */
+export interface ServerSettings {
+    min_gpa: number | null;
+    min_gpa_uta: number | null;
+    weights: ScoringWeights;
+}
+
+export interface WorkspaceSummary {
+    id: string;
+    name: string;
+    sample: string | null;
+    created_at: string;
+    counts: { courses: number; sections: number; applicants: number; locks: number };
+    setup: { rules: boolean; courses: boolean; applicants: boolean; schedule: boolean };
+    settings: ServerSettings;
+    finalized_at: string | null;
+}
+
+/** A workspace file (see backend/ta_assignment/db/bundle.py). */
+export interface WorkspaceFile {
+    format: "easy-sched.workspace";
+    version: 1;
+    name?: string;
+    exported_at?: string;
+    settings?: ServerSettings;
+    courses?: unknown[];
+    sections?: unknown[];
+    applicants?: unknown[];
+    locks?: unknown[];
+    schedule?: { finalized_at: string; assignments: unknown[] };
+}
+
+export interface ImportResult {
+    workspace: WorkspaceSummary;
+    report: { imported: WorkspacePart[]; counts: Record<string, number>; notes: string[] };
+}
 
 export interface LabMeeting {
     lab_id: string;
