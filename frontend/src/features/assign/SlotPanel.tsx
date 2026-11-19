@@ -2,6 +2,7 @@ import { useLockActions } from "../../api/hooks";
 import { useWorkspace } from "../../app/workspace";
 import { Button, Code, ScoreBar } from "../../design/components";
 import { LockIcon } from "../../design/icons";
+import { useToast } from "../../design/toast";
 import type { ApplicantSummary, Lock, SolvedSlot } from "../../types";
 import { findLock, ordinal, sectionLabel, shortSection } from "./model";
 
@@ -24,13 +25,39 @@ export function SlotPanel({ slot, locks, applicants }: Props) {
     const lock = aid ? findLock(locks, aid, slot.section_id, slot.position, "locked") : undefined;
     const maxPoints = Math.max(0.01, ...slot.breakdown.map((b) => b.points));
 
+    const toast = useToast();
+    const where = `${shortSection(slot.section_id)} ${slot.position}`;
+    const nameOf = (id: string) => names.get(id) ?? id;
+
+    // Every change confirms itself with a toast that can undo it, instead of asking "are you sure?" first.
     const place = (applicantId: string, lockType: "locked" | "blocked") =>
-        actions.add.mutate({ applicant_id: applicantId, section_id: slot.section_id, position: slot.position, lock_type: lockType });
+        actions.add.mutate(
+            { applicant_id: applicantId, section_id: slot.section_id, position: slot.position, lock_type: lockType },
+            {
+                onSuccess: (created) => toast({
+                    message: lockType === "locked" ? `Locked ${nameOf(applicantId)} into ${where}` : `Kept ${nameOf(applicantId)} out of ${where}`,
+                    action: { label: "Undo", onClick: () => actions.remove.mutate(created.id) },
+                }),
+            },
+        );
+    const release = (l: Lock) =>
+        actions.remove.mutate(l.id, {
+            onSuccess: () => toast({
+                message: l.lock_type === "locked" ? `Unlocked ${nameOf(l.applicant_id)}` : `${nameOf(l.applicant_id)} can be placed here again`,
+                tone: "neutral",
+                action: {
+                    label: "Undo",
+                    onClick: () => actions.add.mutate({
+                        applicant_id: l.applicant_id, section_id: l.section_id, position: l.position, lock_type: l.lock_type,
+                    }),
+                },
+            }),
+        });
 
     return (
         <aside
             aria-labelledby="slot-panel-title"
-            className="flex-[1_1_340px] min-w-0 max-w-105 bg-surface border border-line rounded-lg self-start lg:sticky lg:top-6"
+            className="flex-[1_1_340px] min-w-0 max-w-105 bg-surface border border-line rounded-lg shadow-md self-start lg:sticky lg:top-6 animate-fade"
         >
             <div className="px-5 py-4 border-b border-line flex flex-col gap-1">
                 <span className="text-xs text-ink-3">
@@ -124,8 +151,8 @@ export function SlotPanel({ slot, locks, applicants }: Props) {
                         {keptOut.map((l) => (
                             <li key={l.id} className="flex items-center justify-between gap-2">
                                 <span>{names.get(l.applicant_id) ?? l.applicant_id}</span>
-                                <Button size="sm" variant="ghost" disabled={actions.pending} onClick={() => actions.remove.mutate(l.id)}>
-                                    Undo
+                                <Button size="sm" variant="ghost" disabled={actions.pending} onClick={() => release(l)}>
+                                    Allow again
                                 </Button>
                             </li>
                         ))}
@@ -136,7 +163,7 @@ export function SlotPanel({ slot, locks, applicants }: Props) {
             {aid && (
                 <div className="px-5 py-3.5 flex flex-wrap gap-2">
                     {lock ? (
-                        <Button disabled={actions.pending} onClick={() => actions.remove.mutate(lock.id)}>Unlock</Button>
+                        <Button disabled={actions.pending} onClick={() => release(lock)}>Unlock</Button>
                     ) : (
                         <Button variant="primary" disabled={actions.pending} onClick={() => place(aid, "locked")}>
                             Lock here

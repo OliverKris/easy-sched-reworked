@@ -82,7 +82,7 @@ export function StartPage() {
                             className={`flex flex-wrap items-center gap-4 p-4 rounded-lg border bg-surface ${isNext ? "border-accent" : "border-line"}`}
                         >
                             <span
-                                className={`flex-none w-7 h-7 rounded-full inline-flex items-center justify-center text-[13px] font-semibold ${isDone ? "bg-accent text-white" : isNext ? "bg-accent-soft text-accent" : "bg-line-soft text-ink-3"}`}
+                                className={`flex-none w-7 h-7 rounded-full inline-flex items-center justify-center text-[13px] font-semibold ${isDone ? "bg-accent text-on-accent" : isNext ? "bg-accent-soft text-accent" : "bg-line-soft text-ink-3"}`}
                                 aria-hidden="true"
                             >
                                 {isDone ? <CheckIcon size={13} /> : i + 1}

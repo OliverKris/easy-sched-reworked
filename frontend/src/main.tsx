@@ -5,6 +5,7 @@ import { RouterProvider } from "react-router";
 import "./index.css";
 import { router } from "./app/router";
 import { WorkspaceProvider } from "./app/workspace";
+import { ToastProvider } from "./design/toast";
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -16,7 +17,9 @@ createRoot(document.getElementById("root")!).render(
     <StrictMode>
         <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
-                <RouterProvider router={router} />
+                <ToastProvider>
+                    <RouterProvider router={router} />
+                </ToastProvider>
             </WorkspaceProvider>
         </QueryClientProvider>
     </StrictMode>,

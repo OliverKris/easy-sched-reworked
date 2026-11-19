@@ -7,7 +7,7 @@ import { CloseIcon } from "./icons";
 /* Form building blocks for the editors. Every control has a real label;
    errors are tied to their field with aria-describedby. */
 
-const control = "min-h-10 px-3 rounded-md border bg-surface text-ink w-full";
+const control = "min-h-9 px-2.5 rounded-md border bg-surface text-ink w-full shadow-sm transition-[border-color,box-shadow] duration-150 hover:border-ink-3/50 focus:outline-none focus:border-accent focus:ring-3 focus:ring-accent/20";
 
 export function Field({ label, hint, error, children, id }: {
     label: string; hint?: string; error?: string | null; children: (id: string, describedBy?: string) => ReactNode; id?: string;
@@ -51,7 +51,7 @@ export function DaysPicker({ value, onChange, label }: { value: Day[]; onChange:
                         aria-label={DAY_NAME[d]}
                         title={DAY_NAME[d]}
                         onClick={() => onChange(on ? value.filter((x) => x !== d) : DAYS.filter((x) => x === d || value.includes(x)))}
-                        className={`w-9 h-9 rounded-md border text-[13px] font-medium cursor-pointer ${on ? "bg-accent text-white border-accent" : "bg-surface text-ink-2 border-control hover:bg-canvas"}`}
+                        className={`w-9 h-9 rounded-md border text-[13px] font-medium cursor-pointer ${on ? "bg-accent text-on-accent border-accent" : "bg-surface text-ink-2 border-control hover:bg-canvas"}`}
                     >
                         {DAY_LETTER[d]}
                     </button>
@@ -150,7 +150,7 @@ export function ConfirmDelete({ label, confirmText, onConfirm, disabled }: {
     return (
         <span className="flex flex-wrap items-center gap-2">
             <span className="text-[13px]">{confirmText}</span>
-            <Button className="bg-danger! border-danger! text-white!" onClick={() => { setAsking(false); onConfirm(); }}>Delete</Button>
+            <Button className="bg-danger! border-danger! text-on-accent!" onClick={() => { setAsking(false); onConfirm(); }}>Delete</Button>
             <Button variant="ghost" onClick={() => setAsking(false)}>Cancel</Button>
         </span>
     );
@@ -161,7 +161,7 @@ export function EditorPanel({ title, subtitle, onClose, children, footer }: {
     title: string; subtitle?: ReactNode; onClose: () => void; children: ReactNode; footer: ReactNode;
 }) {
     return (
-        <aside aria-label={title} className="flex-[1_1_520px] min-w-0 max-w-160 bg-surface border border-line rounded-lg self-start lg:sticky lg:top-6 max-h-[calc(100vh-3rem)] flex flex-col">
+        <aside aria-label={title} className="flex-[1_1_520px] min-w-0 max-w-160 bg-surface border border-line rounded-lg shadow-md self-start lg:sticky lg:top-6 max-h-[calc(100vh-3rem)] flex flex-col animate-slide-in">
             <div className="px-5 py-4 border-b border-line flex items-start justify-between gap-3">
                 <div className="flex flex-col gap-0.5 min-w-0">
                     <h2 className="m-0 text-[17px] font-semibold">{title}</h2>

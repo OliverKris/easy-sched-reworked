@@ -262,7 +262,7 @@ function ManagePanel() {
                     {confirmDelete ? (
                         <>
                             <span className="text-[13px]">Delete “{ws.name}” and everything in it from this browser? This can't be undone.</span>
-                            <Button className="bg-danger! border-danger! text-white! hover:bg-danger!" onClick={remove}>Delete workspace</Button>
+                            <Button className="bg-danger! border-danger! text-on-accent! hover:bg-danger!" onClick={remove}>Delete workspace</Button>
                             <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
                         </>
                     ) : (

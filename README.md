@@ -2,9 +2,12 @@
 
 Easy-Sched assigns student TAs and learning assistants to course sections. Load your courses and applicants, set your department's rules, and an exact matching solver proposes the best schedule, with a plain explanation for every placement and every empty slot. You then lock, adjust, finalize and export it.
 
-**Live demo:** _coming soon_ · [Report a bug](https://github.com/OliverKris/easy-sched-reworked/issues)
+**Live demo:** [easy-sched.onrender.com](https://easy-sched.onrender.com) (free hosting, so the first load can take up to a minute) · [Report a bug](https://github.com/OliverKris/easy-sched-reworked/issues)
 
-![Assignments board with an explanation of why a slot is empty](docs/screenshots/assignments.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/assignments-dark.png">
+  <img src="docs/screenshots/assignments.png" alt="Assignments board: every slot, a fill meter, and why the selected person was placed">
+</picture>
 
 ## Features
 
@@ -15,6 +18,7 @@ Easy-Sched assigns student TAs and learning assistants to course sections. Load 
 - **You stay in control.** Lock a person into a slot, keep someone out, place people by hand, re-solve around your choices, then mark the schedule final.
 - **Private workspaces, no account.** Each browser gets its own workspaces. Export a workspace to a file and import it anywhere (replace or merge).
 - **CSV export** of the finalized schedule.
+- **Light and dark themes**, undo for every change on the board, and a `/` shortcut to search.
 
 ## Quick start
 
@@ -163,7 +167,7 @@ docker run -p 8000:8000 easy-sched     # open http://localhost:8000
 
 ## Roadmap
 
-- Reworked interface: dark mode, motion, keyboard shortcuts, undo
+- Change summary after each re-solve, a by-person view, and more keyboard shortcuts
 - Fuller Rules screen: templates, more rule types, and how many applicants each rule excludes
 - Custom roles beyond LA and UTA
 - Collapsible navigation on phones

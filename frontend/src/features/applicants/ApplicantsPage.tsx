@@ -65,11 +65,11 @@ export function ApplicantsPage() {
                                         <span className="sr-only">Search applicants</span>
                                         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
                                             placeholder="Search by name, ID or course"
-                                            className="flex-1 min-h-9 px-2.5 rounded-md border border-control bg-surface text-ink" />
+                                            className="flex-1 h-9 px-2.5 rounded-md border border-control bg-surface text-ink shadow-sm focus:outline-none focus:border-accent focus:ring-3 focus:ring-accent/20" />
                                     </label>
                                     <span className="text-[13px] text-ink-3">{list.length} applicants</span>
                                 </div>
-                                <div className="bg-surface border border-line rounded-lg overflow-x-auto">
+                                <div className="bg-surface border border-line rounded-lg shadow-sm overflow-x-auto">
                                     <table className="w-full border-collapse min-w-[560px]">
                                         <thead>
                                             <tr className="text-left text-xs text-ink-3">

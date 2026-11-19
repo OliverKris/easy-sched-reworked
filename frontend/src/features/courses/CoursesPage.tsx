@@ -65,7 +65,7 @@ export function CoursesPage() {
                                         <span className="sr-only">Search courses</span>
                                         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
                                             placeholder="Search courses or instructors"
-                                            className="flex-1 min-h-9 px-2.5 rounded-md border border-control bg-surface text-ink" />
+                                            className="flex-1 h-9 px-2.5 rounded-md border border-control bg-surface text-ink shadow-sm focus:outline-none focus:border-accent focus:ring-3 focus:ring-accent/20" />
                                     </label>
                                     <span className="text-[13px] text-ink-3">{list.length} courses · {sectionCount} sections</span>
                                 </div>
