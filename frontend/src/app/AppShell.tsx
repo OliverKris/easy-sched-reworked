@@ -1,5 +1,8 @@
-import { Navigate, NavLink, Outlet, useNavigate } from "react-router";
-import { Spinner } from "../design/components";
+import { useEffect, useState } from "react";
+import { Link, Navigate, NavLink, Outlet, useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Hint, Spinner } from "../design/components";
+import { getConfig } from "../lib/api";
 import { Logo } from "../design/icons";
 import { useWorkspace } from "./workspace";
 
@@ -19,9 +22,7 @@ export function AppShell() {
     const { status, error, workspaces, current, open } = useWorkspace();
     const navigate = useNavigate();
 
-    if (status === "loading") {
-        return <div className="min-h-screen grid place-items-center"><Spinner /></div>;
-    }
+    if (status === "loading") return <WakingUp />;
     if (status === "error") {
         return (
             <div className="min-h-screen grid place-items-center px-6">
@@ -81,6 +82,7 @@ export function AppShell() {
             </nav>
 
             <main className="flex-[999_1_560px] min-w-0 box-border px-8 pt-7 pb-14">
+                <DemoNotice />
                 <Outlet />
             </main>
         </div>
@@ -93,4 +95,35 @@ function SetupProgress() {
     const done = Object.values(current.setup).filter(Boolean).length;
     if (done === 4) return null;
     return <span className="text-xs text-ink-3 tabular-nums" aria-label={`${done} of 4 steps done`}>{done}/4</span>;
+}
+
+/** Free hosting sleeps when idle; the first request can take ~30 s, so say why we're waiting. */
+function WakingUp() {
+    const [slow, setSlow] = useState(false);
+    useEffect(() => {
+        const t = window.setTimeout(() => setSlow(true), 2500);
+        return () => window.clearTimeout(t);
+    }, []);
+    return (
+        <div className="min-h-screen grid place-items-center px-6">
+            <div className="flex flex-col items-center gap-2 text-center">
+                <Spinner label={slow ? "Waking up the server…" : "Loading"} />
+                {slow && <p className="text-[13px] text-ink-3 max-w-xs">The demo sleeps when nobody is using it. This takes up to a minute the first time.</p>}
+            </div>
+        </div>
+    );
+}
+
+/** On the public demo, storage resets when the server sleeps or redeploys. */
+function DemoNotice() {
+    const { data } = useQuery({ queryKey: ["config"], queryFn: getConfig, staleTime: Infinity });
+    if (!data?.demo_mode) return null;
+    return (
+        <div className="mb-6">
+            <Hint id="demo-server">
+                This is a public demo. Workspaces are cleared when the server sleeps, so{" "}
+                <Link to="/data">export a workspace file</Link> to keep your work.
+            </Hint>
+        </div>
+    );
 }

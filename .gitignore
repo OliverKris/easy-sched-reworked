@@ -18,4 +18,12 @@ env/
 
 # Data outputs you don't want tracked
 src/data/processed_courses.json
-src/data/applicants.jsonbackend/*.db
+src/data/applicants.json
+
+# Local database
+backend/*.db
+
+# Frontend
+node_modules/
+frontend/dist/
+

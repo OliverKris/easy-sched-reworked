@@ -11,15 +11,21 @@ mutated in place by the CRUD endpoints below.
 Run with (from backend/):
     pip install -r requirements.txt
     uvicorn api:app --reload --port 8000
+
+In production the same app also serves the built frontend (see the bottom
+of this file), so the whole product runs as one service.
     
 Docs at http://127.0.0.1:8000/docs (FastAPI's auto-generated Swagger UI).
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Dict, Literal, List, Optional
 
 from fastapi import Header, Response, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -41,6 +47,7 @@ from ta_assignment.matching_solver import MatchingSolver
 from ta_assignment.rules import compile_profile
 from ta_assignment.rules.legacy import profile_from_legacy
 from solve_view import build_solve_view
+import os
 import time
 import csv
 import io
@@ -55,14 +62,31 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Easy Sched API", lifespan=lifespan)
 
-# allow React dev server
+# Deployment settings, all from the environment so the same code runs locally and on a host.
+#   EASY_SCHED_CORS_ORIGINS   comma-separated origins allowed to call the API from another site
+#                             (only needed when the frontend is served from a different domain)
+#   EASY_SCHED_DEMO_MODE      "1" on a public demo whose storage can be wiped; the app warns users
+#   EASY_SCHED_FRONTEND_DIST  folder with the built frontend (default ../frontend/dist)
+CORS_ORIGINS = [o.strip() for o in os.environ.get("EASY_SCHED_CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+DEMO_MODE = os.environ.get("EASY_SCHED_DEMO_MODE", "").lower() in ("1", "true", "yes")
+MAX_BODY_BYTES = 5 * 1024 * 1024
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def limit_body_size(request, call_next):
+    """Reject oversized uploads before reading them (a public demo shouldn't accept 1 GB CSVs)."""
+    length = request.headers.get("content-length")
+    if length is not None and length.isdigit() and int(length) > MAX_BODY_BYTES:
+        return JSONResponse({"detail": "That file is too large (limit 5 MB)."}, status_code=413)
+    return await call_next(request)
 
 
 def client_id(x_client_id: Optional[str] = Header(None, alias="X-Client-Id")) -> Optional[str]:
@@ -145,6 +169,12 @@ def applicant_summary(applicant, application=None) -> dict:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+def config():
+    """Facts about this server the frontend adapts to."""
+    return {"demo_mode": DEMO_MODE}
 
 
 @app.get("/api/datasets")
@@ -1052,3 +1082,28 @@ def csv_upload(workspace_id: str, kind: Literal["sections", "applicants"], paylo
     except bundle_io.BundleError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {**result, "imported": True, "report": report, "workspace": ws_repo.summarize(db, ws)}
+
+
+# ----------------------------------------------------------------
+# Built frontend (production): one service serves the API and app
+# ----------------------------------------------------------------
+# Registered last, so every API route above wins. Any other GET returns a
+# file from the build, or index.html so client-side routes like /assign load.
+
+FRONTEND_DIST = Path(os.environ.get(
+    "EASY_SCHED_FRONTEND_DIST", Path(__file__).resolve().parent.parent / "frontend" / "dist"
+)).resolve()
+_API_PREFIXES = ("api/", "health", "docs", "redoc", "openapi.json")
+
+if (FRONTEND_DIST / "index.html").is_file():
+    if (FRONTEND_DIST / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def frontend(full_path: str):
+        if full_path.startswith(_API_PREFIXES):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = (FRONTEND_DIST / full_path).resolve()
+        if full_path and candidate.is_file() and FRONTEND_DIST in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-cache"})

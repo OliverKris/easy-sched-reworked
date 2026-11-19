@@ -1,0 +1,14 @@
+# Render Blueprint: New > Blueprint in the Render dashboard, pick this repo.
+services:
+  - type: web
+    name: easy-sched
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    # Deploy only after GitHub Actions passes on main
+    autoDeployTrigger: checksPass
+    envVars:
+      # Free instances have no persistent disk: data resets when the
+      # service sleeps or redeploys, so the app tells people to export.
+      - key: EASY_SCHED_DEMO_MODE
+        value: "1"

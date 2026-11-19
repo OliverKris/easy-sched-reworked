@@ -64,6 +64,11 @@ const ds = (dataset: DatasetKey) => encodeURIComponent(dataset);
 
 // --- Workspaces ----------------------------------------------------------------
 
+/** Facts about the server, e.g. whether it's a public demo whose storage can reset. */
+export function getConfig(): Promise<{ demo_mode: boolean }> {
+    return getJSON("/api/config");
+}
+
 export function listWorkspaces(): Promise<{ workspaces: WorkspaceSummary[] }> {
     return getJSON("/api/workspaces");
 }
